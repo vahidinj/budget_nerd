@@ -1716,6 +1716,7 @@ export const App: React.FC = () => {
 											<DragonOrbIcon size={22} className="orb-icon" />
 											<span className="kw">Upload PDF(s)</span>
 										</button>
+										<span className="upload-secure-note" aria-hidden>🔒 Encrypted upload to mybudgetnerd.com — HTTPS</span>
 										<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try sample</span></button>
 										<input ref={fileInputRef} type="file" aria-hidden="true" accept="application/pdf" multiple style={{display:'none'}} onChange={onFileInputChange} />
 									</div>
@@ -2726,6 +2727,18 @@ export const App: React.FC = () => {
 						</div>
 					)}
 				</main>
+				<footer className="site-footer" role="contentinfo">
+					<div className="footer-inner">
+						<div className="footer-left">
+							<span className="brand">mybudgetnerd.com</span>
+							<span className="sep">·</span>
+							<a href="mailto:deanjx2015@gmail.com">Contact</a>
+						</div>
+						<div className="footer-right">
+							<small>Secure · Private · Ephemeral</small>
+						</div>
+					</div>
+				</footer>
 			</div>
 		</React.Suspense>
 	);

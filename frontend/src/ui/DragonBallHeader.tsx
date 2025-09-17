@@ -7,12 +7,17 @@ export const DragonBallHeader: React.FC = () => {
       <div className="logo-block">
         <div className="logo">
           <MascotIcon size={44} />
-          <span className="brand"> Dragon Ledger</span>
+          <span className="brand"> Budget Nerd</span>
+          <span className="domain">mybudgetnerd.com</span>
         </div>
         <span className="version-chip" title="App version">v0.1</span>
       </div>
       <div className="subtitle">
-        And this is to go even furher beyond with your Budgeting.
+        And this is to go even furher beyond ... with your Budgeting.
+      </div>
+      <div className="header-meta">
+        <span className="tagline">Secure · Private · Ephemeral</span>
+        <span className="secure-note" aria-hidden>🔒 Secure connection</span>
       </div>
       <div className="header-actions" aria-label="Quick actions">
         {/* Future space for settings/help/theme toggle */}

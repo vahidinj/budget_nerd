@@ -178,6 +178,18 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 .dbz-header .subtitle { font-size:.78rem; line-height:1.3; max-width:880px; opacity:.68; font-weight:400; }
 .dbz-header .header-actions { position:absolute; top:1.2rem; right:0; display:flex; align-items:center; gap:.5rem; }
 
+/* Domain & trust microcopy for header */
+.dbz-header .domain {
+  font-size:0.95rem;
+  color:var(--text-base);
+  font-weight:600;
+  opacity:0.95;
+  margin-left:0.2rem;
+}
+.dbz-header .header-meta { display:flex; flex-direction:column; gap:0.12rem; margin-left:0.4rem; }
+.dbz-header .header-meta .tagline { font-size:0.82rem; color:var(--text-muted); font-weight:600; }
+.dbz-header .header-meta .secure-note { font-size:0.75rem; color:var(--text-faint); opacity:0.9; }
+
 /* Mascot icon spacing and responsive sizing */
 .mascot-icon {
   display: inline-block;
@@ -201,6 +213,32 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 }
 
 .upload-panel { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin:1rem 0; }
+
+/* Upload microcopy to reassure encryption/HTTPS */
+.upload-secure-note {
+  font-size:0.82rem;
+  color:var(--text-muted);
+  margin-left:0.45rem;
+  display:inline-flex;
+  align-items:center;
+  gap:0.4rem;
+}
+
+/* Site footer with domain and trust tagline */
+.site-footer {
+  margin-top:2.6rem;
+  padding-top:1.1rem;
+  border-top:1px solid rgba(255,255,255,0.03);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:1rem;
+  color:var(--text-muted);
+  font-size:0.84rem;
+}
+.site-footer .brand { font-weight:700; color:var(--text-base); }
+.site-footer .brand a { color:var(--link-accent); text-decoration:none; }
+.site-footer .small-tag { color:var(--text-faint); font-size:0.78rem; }
 .upload-btn { position:relative; display:inline-flex; align-items:center; gap:.55rem; background:linear-gradient(135deg,#19222c 0%,#202b37 70%); padding:.75rem 1.05rem; border-radius:10px; cursor:pointer; font-weight:600; font-size:.82rem; letter-spacing:.05em; text-transform:uppercase; color:var(--upload-cta-text); text-shadow:var(--upload-cta-text-shadow); border:1px solid #2c3b4a; box-shadow:0 4px 10px -4px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.04) inset; transition:background .25s, box-shadow .25s, transform .2s, border-color .25s; }
 .upload-btn { overflow:hidden; }
 .upload-btn:after { content:""; position:absolute; inset:0; border-radius:inherit; background:radial-gradient(circle at 35% 50%, rgba(255,179,71,.55), rgba(255,179,71,0) 65%); opacity:0; transform:scale(.65); pointer-events:none; mix-blend-mode:screen; }
