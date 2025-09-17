@@ -208,6 +208,42 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
   }
 }
 
+/* Mobile improvements for accounts metric and filters */
+@media (max-width: 640px) {
+  /* Stack accounts metric into a single column for narrow viewports */
+  .metric.accounts-metric {
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:0.45rem;
+    padding:.6rem .65rem;
+  }
+  .metric.accounts-metric > span { grid-area:unset; font-size:0.78rem; }
+  .metric.accounts-metric > strong { grid-area:unset; font-size:1.02rem; }
+  .metric.accounts-metric .possible-issues-cta { grid-area:unset; justify-self:flex-start; align-self:flex-start; }
+  .metric.accounts-metric .acct-legend { grid-area:unset; display:flex; flex-direction:row; gap:.5rem; align-items:center; }
+  .metric.accounts-metric .acct-legend .mix-bar { flex:1 1 auto; min-width:80px; height:8px; }
+  .metric.accounts-metric .acct-mini-counts { display:flex; gap:.4rem; flex-wrap:wrap; }
+  .metric.accounts-metric .txns-line { white-space:normal; overflow:visible; }
+  .metric.accounts-metric .possible-issues-cta { width:100%; }
+
+  /* Simplify filters panel to single column and enlarged hit targets */
+  .filters.consolidated {
+    padding: .75rem .8rem;
+    border-radius: 10px;
+  }
+  .filters.consolidated .filters-head { flex-direction:column; align-items:stretch; gap:.45rem; }
+  .filter-primary-row { grid-template-columns: 1fr; }
+  .filter-primary-row.grid2 { grid-template-columns: 1fr; }
+  .filters-secondary-row { flex-direction:column; gap:.5rem; }
+  .filters .search-composite { flex-direction:column; gap:.5rem; }
+  .filters .search-composite input.filter-text { height:44px; font-size:1rem; }
+  .filters .search-composite .date-range.inside-search { position:static; transform:none; }
+  .filters-toggle, .clear-filters.inline, .col-toggle-btn { width:100%; text-align:center; }
+  .col-toggle-group { justify-content:flex-start; overflow-x:auto; }
+  .filters-advanced { width:100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mascot-icon { transition: none !important; }
 }
