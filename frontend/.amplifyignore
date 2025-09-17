@@ -1,0 +1,20 @@
+# Prevent Amplify from packaging backend files or local artifacts
+../backend/
+backend/
+Dockerfile
+docker-compose.yml
+
+# Node and build artifacts
+node_modules/
+dist/
+.vite/
+
+# Local environment files
+.env
+.env.local
+.env.*
+
+# Python/other artifacts
+.venv/
+*.sqlite*
+*.log
