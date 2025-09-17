@@ -1,0 +1,67 @@
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# AWS/Cloud/Secrets
+.aws/
+.envrc
+*.bak
+*.old
+*.sqlite*
+*.db
+*.env.local
+*.secret*
+*secrets*/
+*private*/
+*backup*/
+*test.db
+*test.sqlite
+*local.db
+*local.sqlite
+*token*
+*cert*
+*session*
+*cache*
+*debug*
+*tmp*
+*temp*
+*sample.env
+*example.env
+
+# Secrets and credentials
+.env
+.env.*
+secrets.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+credentials-*.json
+
+# Azure local state
+.azure/
+.azd/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+.DS_Store

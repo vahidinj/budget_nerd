@@ -1,0 +1,10 @@
+streamlit
+pandas
+matplotlib
+pdfplumber
+fastapi
+gunicorn
+uvicorn
+plotly
+sentence-transformers>=2.7.0
+python-multipart

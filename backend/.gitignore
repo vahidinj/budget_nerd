@@ -1,0 +1,52 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+# local python artifacts
+.Python
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# sensitive / secret files
+secrets.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+credentials-*.json
+
+# AWS/Cloud/Secrets
+.aws/
+.envrc
+*.bak
+*.old
+*.sqlite*
+*.db
+*.env.local
+*.secret*
+*secrets*/
+*private*/
+*backup*/
+*test.db
+*test.sqlite
+*local.db
+*local.sqlite
+*token*
+*cert*
+*session*
+*cache*
+*debug*
+*tmp*
+*temp*
+*sample.env
+*example.env
+
+# azure local state
+.azure/
+.azd/
+
+.DS_Store

@@ -1,0 +1,60 @@
+Business Source License 1.1 (BSL) — budget_app
+
+Copyright (c) 2025 Dean Jupic
+
+This file contains the Business Source License 1.1 terms that apply to
+the source code in this repository. The license restricts production
+use for a limited time and automatically converts to the specified
+Change License on the Change Date.
+
+Licensed Work: budget_app (this repository)
+
+Change Date: 2036-09-17
+
+Change License: Apache License, Version 2.0
+
+License Grant
+-------------
+Subject to the terms and conditions of this Business Source License 1.1
+("BSL"), Licensor hereby grants You a non-exclusive, worldwide, royalty-
+free license to use the Licensed Work under the usage rules stated below.
+
+Usage Rules (Permitted and Restricted Uses)
+ - You may view and fork the source code for reference, study, and
+   non-production purposes.
+ - You may make modifications and compile the code for internal testing
+   and development.
+ - You may NOT use the Licensed Work in production or provide the
+   Licensed Work as a service to third parties for a commercial purpose
+   until the Change Date, unless You obtain a separate commercial
+   license from Licensor.
+
+Change License and Automatic Conversion
+-------------------------------------
+On the Change Date listed above, all Covered Code in this repository
+will be automatically licensed under the Change License (Apache
+License, Version 2.0). After the Change Date the code will be available
+under Apache-2.0 for any purpose permitted by that license.
+
+Termination
+-----------
+If You breach these terms, Licensor may terminate this license. Upon
+termination all rights granted under this BSL will cease and the
+Licensor may pursue any remedies available under law.
+
+Third-Party Licenses
+--------------------
+Some parts of the repository may include components under different
+licenses. Those components remain subject to their own license terms.
+
+No Warranty
+----------
+The Licensed Work is provided "AS IS", without warranty of any kind.
+
+Contact and Commercial Licensing
+--------------------------------
+To obtain a commercial license prior to the Change Date, contact:
+deanjx2015@gmail.com
+
+Full text and an official copy of the Business Source License 1.1 can
+be found at: https://mariadb.com/bsl/
