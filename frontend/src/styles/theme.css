@@ -1409,6 +1409,56 @@ html.high-contrast .chip.active { background:#fff; color:#000; }
 .categorize-inline .cat-actions { display:inline-flex; align-items:center; gap:.5rem; }
 .categorize-inline .divider { width:1px; align-self:stretch; background:linear-gradient(to bottom, rgba(255,255,255,.06), rgba(255,255,255,.15) 50%, rgba(255,255,255,.06)); margin:.1rem .1rem; }
 .categorize-inline .ai-section { display:flex; align-items:center; gap:.45rem; }
+
+/* Mobile / small-screen improvements */
+@media (max-width: 640px) {
+  :root { --container-pad-x: .6rem; --container-pad-y: .45rem; }
+  .app-shell { padding: 0 0.8rem 3rem; max-width:100%; }
+
+  /* Header: stack and reduce spacing */
+  .dbz-header { padding:.7rem .6rem .6rem; }
+  .dbz-header .logo-block { gap:.4rem; align-items:center; }
+  .dbz-header .header-actions { position:static; top:auto; right:auto; margin-top:.35rem; display:flex; justify-content:flex-end; }
+  .dbz-header .header-meta { flex-direction:row; gap:.4rem; align-items:center; }
+  .dbz-header .header-meta .secure-note { display:none; }
+  .dbz-header .domain { font-size:0.92rem; }
+
+  /* Cover: stack columns and reduce hero size */
+  .cover { padding:1.2rem 1rem 1.4rem; border-radius:12px; }
+  .cover h1.cover-global-title { font-size:1.45rem; text-align:left; max-width:100%; }
+  .global-tagline { text-align:left; font-size:0.95rem; }
+  .cover-grid { grid-template-columns:1fr; gap:1rem; }
+  .cover-left, .cover-right { padding:0; }
+  .cover-left .cta-row { margin-top:.4rem; }
+
+  /* CTAs & upload: full width, stacked */
+  .cta-row { flex-direction:column; align-items:stretch; gap:.6rem; }
+  .upload-panel { flex-direction:column; align-items:stretch; gap:.6rem; }
+  .upload-btn, .primary-cta, .secondary-cta, .download-btn { width:100%; justify-content:center; }
+  .upload-zone { padding:1rem; }
+
+  /* Cards and compact text */
+  .recent-card, .value-grid .val-item { font-size:0. Ninerem; }
+  .recent-card, .value-grid .val-item { padding:.6rem .7rem; }
+
+  /* Footer: stack and left-align */
+  .site-footer { flex-direction:column; align-items:flex-start; gap:.5rem; padding-top:.8rem; font-size:0.82rem; }
+  .site-footer .brand { font-size:0.96rem; }
+
+  /* Smaller mascot and charts flow */
+  .mascot-icon { width:28px; height:28px; }
+  .charts-row.four-charts.unified .chart { flex:1 1 100%; width:100%; }
+
+  /* Filters and inputs: reduce paddings to avoid overflow */
+  .filters .search-composite input.filter-text { padding-right:1rem; }
+  .primary-actions { flex-direction:column; gap:.5rem; }
+
+  /* Accordion / instruction bodies more compact */
+  .instruction-accordion .ia-item .ia-body { padding:.65rem .85rem; }
+
+  /* Tables / wrappers */
+  .table-wrapper { padding:.6rem .7rem; }
+}
 .categorize-inline .ai-section .ai-privacy-note { margin-left:.2rem; }
 .ai-switch { position:relative; display:inline-flex; align-items:center; gap:.25rem; cursor:pointer; font-size:.55rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:.15rem .4rem .2rem .3rem; background:#19222c; border:1px solid #2c3845; border-radius:999px; color:#d2d8dd; transition:background .25s, border-color .25s, color .25s; }
 .ai-switch:hover { background:#1f2a35; }
