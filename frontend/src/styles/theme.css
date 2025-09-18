@@ -244,6 +244,47 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
   .filters-advanced { width:100%; }
 }
 
+/* Ensure popovers (consistency, categorize, generic poppers) stay inside viewport on small screens */
+@media (max-width: 640px) {
+  /* Specific known popover used by metrics */
+  .consistency-popover {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 12px !important;
+    top: auto !important;
+    width: auto !important;
+    max-width: calc(100% - 16px) !important;
+    z-index: 22000 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 28px -8px rgba(0,0,0,.7) !important;
+    transform: none !important;
+    pointer-events: auto !important;
+  }
+  .consistency-popover:before { display:none !important; }
+
+  /* Generic fallbacks for other popovers/poppers used by filters/categorize components */
+  .popover, .pop-over, .popper, .popper__box, .popper__content, [data-popover], .dropdown-popover {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 12px !important;
+    top: auto !important;
+    width: auto !important;
+    max-width: calc(100% - 16px) !important;
+    z-index: 22000 !important;
+    transform: none !important;
+  }
+  .popover:before, .pop-over:before, .popper__box:before, .dropdown-popover:before { display:none !important; }
+
+  /* If a popover is used inside filters and is intended to anchor to a right-edge, ensure it doesn't overflow
+     and instead uses full-width layout for easier tapping */
+  .filters .popper, .filters .dropdown-popover, .filters [data-popover] {
+    left: 8px !important;
+    right: 8px !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mascot-icon { transition: none !important; }
 }
