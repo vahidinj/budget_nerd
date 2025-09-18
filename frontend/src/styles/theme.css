@@ -5,46 +5,6 @@
   margin-top: .18em;
   box-shadow: 0 1.5px 0 #ffe6a6 inset;
 }
-/* Small-screen fixes: ensure ratio/mix-bar segments keep colors and stack categorize AI buttons */
-@media (max-width: 640px) {
-  /* Make sure the account mix bar segments remain visible and keep their backgrounds */
-  .metric.accounts-metric .acct-legend .mix-bar {
-    display: flex !important;
-    align-items: center !important;
-    height: 6px !important;
-    overflow: hidden !important;
-  }
-  .metric.accounts-metric .acct-legend .mix-bar .seg {
-    flex: 0 0 auto !important;
-    min-width: 6px !important;
-    height: 100% !important;
-    border-radius: 4px !important;
-    box-shadow: none !important;
-    opacity: 1 !important;
-    background-repeat: no-repeat !important;
-    background-size: cover !important;
-  }
-  /* Reapply gradients explicitly so small-screen overrides don't remove them */
-  .metric.accounts-metric .acct-legend .mix-bar .seg.checking { background: linear-gradient(90deg, var(--acct-checking), color-mix(in srgb, var(--acct-checking) 60%, #0f1115 40%)) !important; }
-  .metric.accounts-metric .acct-legend .mix-bar .seg.savings { background: linear-gradient(90deg, var(--acct-savings), color-mix(in srgb, var(--acct-savings) 60%, #0f1115 40%)) !important; }
-  .metric.accounts-metric .acct-legend .mix-bar .seg.credit-card { background: linear-gradient(90deg, var(--acct-credit), color-mix(in srgb, var(--acct-credit) 60%, #0f1115 40%)) !important; }
-
-  /* Stack categorize actions: put AI toggle and info below the main categorize button */
-  .categorize-inline .cat-actions {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 8px !important;
-    align-items: stretch !important;
-  }
-  .categorize-inline .cat-actions > * {
-    width: 100% !important;
-    min-width: 0 !important;
-    box-sizing: border-box !important;
-  }
-  /* Ensure the main categorize button stays visually primary (it appears first) */
-  .categorize-inline .categorize-btn { order: 1 !important; }
-  .categorize-inline .ai-section, .categorize-inline .cat-info-wrap { order: 2 !important; }
-}
 /* Utility helpers to reduce inline styles and centralize theme tokens */
 .loading-fallback { padding: 2rem; color: var(--text-strong); }
 .chart-loading { display:flex; align-items:center; justify-content:center; min-height:180px; }
@@ -245,6 +205,177 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
     width: 32px;
     height: 32px;
     margin-right: 0.4rem;
+  }
+}
+
+/* Mobile integration: search bar full-width; place date filters + categorize below it and keep symmetry */
+@media (max-width: 640px) {
+  /* Make the search composite occupy the full row */
+  .filters .search-composite {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    width: 100% !important;
+    align-items: stretch !important;
+  }
+
+  .filters .search-composite input.filter-text {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: .6rem .7rem !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Stack primary row grid (search left / date right) into a column and then place categorize below */
+  .filter-primary-row.grid2 {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+    width: 100% !important;
+  }
+
+  /* Make date picker and categorize controls match heights/padding */
+  .filter-primary-row.grid2 .primary-right,
+  .filter-primary-row.grid2 .primary-left {
+    width: 100% !important;
+    display:flex !important;
+    flex-direction:column !important;
+    gap:8px !important;
+  }
+
+  .date-picker-display, .categorize-cluster .categorize-btn, .categorize-cluster .ai-pill-toggle.compact {
+    height: 40px !important;
+    padding: .42rem .6rem !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Place categorize cluster below the search + date area */
+  .filter-primary-row.grid2 .primary-right .categorize-cluster {
+    order: 100 !important;
+    width: 100% !important;
+    margin-top: 4px !important;
+  }
+
+  /* If categorize sits outside primary-right, ensure it's placed under search */
+  .categorize-cluster { order: 200 !important; }
+
+  /* Make categorize buttons slightly more compact to match date pickers */
+  .categorize-cluster .categorize-btn.inline,
+  .categorize-cluster .categorize-btn { padding: .42rem .6rem !important; font-size: .9rem !important; }
+
+  /* Reduce chip sizes inside categorize to prevent overflow */
+  .categorize-cluster .chip { padding: .28rem .48rem !important; font-size: .78rem !important; }
+}
+
+/* Stack and constrain categorize cluster on small screens */
+@media (max-width: 640px) {
+  .categorize-cluster {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    padding: 10px !important;
+    box-sizing: border-box !important;
+  }
+
+  .categorize-cluster .cat-main-row,
+  .categorize-cluster .cat-left-group,
+  .categorize-cluster .cat-right-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+    width: 100% !important;
+  }
+
+  .categorize-cluster .categorize-btn,
+  .categorize-cluster .categorize-btn.inline,
+  .categorize-cluster .ai-pill-toggle.compact,
+  .categorize-cluster .cat-status-badge,
+  .categorize-cluster .cat-foot-row {
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Make tag/legend chips wrap instead of overflowing */
+  .categorize-cluster .cat-left-group .chip,
+  .categorize-cluster .cat-right-group .chip,
+  .categorize-cluster .acct-mini-counts {
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  /* If there are inline actions on the right, move them under the main content */
+  .categorize-cluster .cat-right-group { order: 99 !important; }
+
+  /* Reduce font-size slightly to help fit tight groups */
+  .categorize-cluster, .categorize-cluster * { font-size: 0.95em !important; }
+}
+
+/* Strong exceptions for the accounts ratio (mix-bar) on very small screens.
+   These rules override broader "make every child 100% width" fallbacks so the
+   small ratio bar renders horizontally and keeps its colors and proportions. */
+@media (max-width: 640px) {
+  .metric.accounts-metric .acct-legend .mix-bar {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    gap: 0 !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    height: 8px !important;
+    min-width: 40px !important;
+    width: calc(100% - 0px) !important;
+    overflow: hidden !important;
+    background: #202a34 !important;
+  }
+
+  .metric.accounts-metric .acct-legend .mix-bar .seg {
+    /* Allow inline/percentage widths from JS/markup to control segment size.
+       If no inline width is present, let segments grow proportionally. */
+    flex: 0 0 auto !important;
+    min-width: 8px !important;
+    height: 100% !important;
+    display: block !important;
+    opacity: 1 !important;
+    filter: none !important;
+    background-blend-mode: normal !important;
+    border-radius: 2px !important;
+    box-sizing: border-box !important;
+  }
+
+  /* If widths are applied inline (style attribute), keep them honored */
+  .metric.accounts-metric .acct-legend .mix-bar .seg[style] {
+    flex: 0 0 auto !important;
+  }
+
+  /* If a segment does not have an inline width provided by JS, allow it
+     to flex and proportionally share the remaining space. */
+  .metric.accounts-metric .acct-legend .mix-bar .seg:not([style]) {
+    flex: 1 1 0 !important;
+    width: auto !important;
+  }
+
+  /* Prevent the generic rule that makes children 100% from affecting mixes */
+  .metric.accounts-metric .acct-legend, .metric.accounts-metric .acct-legend * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Ensure the legend chips don't wrap over the mix-bar */
+  .metric.accounts-metric .acct-legend .acct-mini-counts,
+  .metric.accounts-metric .acct-legend .acct-legend-chips {
+    display:flex !important;
+    flex-wrap:wrap !important;
+    gap:6px !important;
+    margin-top:6px !important;
   }
 }
 
