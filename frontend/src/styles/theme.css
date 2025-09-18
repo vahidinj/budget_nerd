@@ -1501,6 +1501,35 @@ html.high-contrast .chip.active { background:#fff; color:#000; }
   .filters .search-composite input.filter-text { padding-right:1rem; }
   .primary-actions { flex-direction:column; gap:.5rem; }
 
+  /* Ensure filter options always wrap and don't overflow */
+  .filters .options { flex-wrap:wrap !important; overflow-x:visible !important; }
+  .filters .options > * { flex: 1 1 auto !important; min-width:44px !important; max-width:100% !important; white-space:normal !important; }
+
+  /* Accounts metric: force CTA to its own row, shrink and allow truncation */
+  .metric.accounts-metric { grid-template-areas: "title" "value" "chips" "cta"; grid-template-columns: 1fr; }
+  .metric.accounts-metric .possible-issues-cta { justify-self: start !important; width:100% !important; max-width:100% !important; margin-top:.25rem; }
+  .metric.accounts-metric .possible-issues-cta .btn, .metric.accounts-metric .possible-issues-cta button { width:100% !important; box-sizing:border-box; }
+  .metric.accounts-metric .txns-line, .metric.accounts-metric .accounts-value { min-width:0 !important; overflow:hidden; }
+
+  /* Inset mix-bar further and reduce height so it never touches card edge */
+  .metric.accounts-metric .acct-legend .mix-bar { width: calc(100% - 28px) !important; margin: 0 auto !important; height:5px !important; }
+
+  /* Categorize cluster: stack controls and make toggles full width */
+  .categorize-cluster, .categorize-inline { width:100% !important; }
+  .categorize-cluster .cat-main-row, .categorize-inline .cat-actions, .categorize-inline .ai-section { flex-direction:column !important; align-items:stretch !important; gap:.45rem !important; }
+  .categorize-cluster .categorize-btn, .categorize-inline .categorize-btn, .ai-pill-toggle, .ai-toggle, .col-toggle-btn { width:100% !important; max-width:100% !important; }
+
+  /* Popovers & modals: full width and anchored to viewport to avoid clipping */
+  .consistency-popover, .tooltip, .date-pop, .themed-modal-content, .consistency-popover, .quality-collapse-body { position: fixed !important; left: 0 !important; right: 0 !important; width: 100% !important; max-width: 100% !important; margin:0 !important; border-radius:0 !important; box-shadow:none !important; }
+
+  /* Tables and charts: allow wrapping, reduce min widths to prevent horizontal scroll */
+  .txn-table, .table-wrapper, .chart, .charts-row { min-width:0 !important; overflow-x:auto !important; }
+  .txn-table th:nth-child(1), .txn-table td:nth-child(1){ width:auto !important; }
+  .txn-table th:nth-child(3), .txn-table td:nth-child(3){ width:auto !important; }
+
+  /* Compactify some paddings globally on very small screens */
+  .filters .filter-line, .filters-panel, .filters-advanced, .categorize-cluster, .metric.accounts-metric { padding: .28rem .45rem !important; }
+
   /* Accordion / instruction bodies more compact */
   .instruction-accordion .ia-item .ia-body { padding:.65rem .85rem; }
 
