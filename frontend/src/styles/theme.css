@@ -452,12 +452,29 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 .metric.accounts-metric .accounts-value .big { font-size: 1.05rem; font-weight: 650; }
 .metric.accounts-metric .accounts-value .of-total { margin-left: 0; background: transparent; border: 0; color: var(--text-muted); font-weight: 600; }
 .metric.accounts-metric .acct-legend { grid-area: chips; display: flex; flex-direction: column; gap: .3rem; max-width: 100%; box-sizing: border-box; overflow: hidden; }
-.metric.accounts-metric .acct-legend .mix-bar { display: flex; height: 6px; background: #202a34; border: 1px solid #2d3946; border-radius: 4px; overflow: hidden; }
+.metric.accounts-metric .acct-legend .mix-bar { display: flex; height: 6px; background: #202a34; border: 1px solid #2d3946; border-radius: 4px; overflow: hidden; width: calc(100% - 12px); margin: 0 auto; }
 .metric.accounts-metric .acct-legend .mix-bar .seg { display: inline-block; height: 100%; background: linear-gradient(90deg, #2e3a48, #2e3a48); }
 .metric.accounts-metric .acct-legend .mix-bar .seg.checking { background: linear-gradient(90deg, var(--acct-checking), color-mix(in srgb, var(--acct-checking) 60%, #0f1115 40%)); }
 .metric.accounts-metric .acct-legend .mix-bar .seg.savings { background: linear-gradient(90deg, var(--acct-savings), color-mix(in srgb, var(--acct-savings) 60%, #0f1115 40%)); }
 .metric.accounts-metric .acct-legend .mix-bar .seg.credit-card { background: linear-gradient(90deg, var(--acct-credit), color-mix(in srgb, var(--acct-credit) 60%, #0f1115 40%)); }
 .metric.accounts-metric .acct-mini-counts { margin-top: 0; gap: .25rem .35rem; }
+.metric .badge-inline.possible { background:#2c3541; color:#ffb347; border-color:#3d4a57; }
+.metric.status-warn .badge-inline.possible { background:#473d23; color:#ffb347; border-color:#6a5a38; }
+.metric.status-attn .badge-inline.possible { background:#47232b; color:#ff6b6b; border-color:#6a3841; }
+.metric.status-good .badge-inline.possible { background:#1a2b22; color:#5ad67d; border-color:#2e6f4a; }
+
+/* Mobile-specific reductions to avoid overflow */
+@media (max-width: 520px) {
+  .metric.accounts-metric .possible-issues-cta { padding: .18rem .4rem; font-size: .68rem; min-width: 0; max-width: 38%; }
+  .metric.accounts-metric .possible-issues-cta .btn, .metric.accounts-metric .possible-issues-cta button { padding: .26rem .4rem; font-size: .66rem; }
+  .metric.accounts-metric .acct-legend .mix-bar { width: calc(100% - 18px); height: 5px; }
+  .metric.accounts-metric .acct-legend .mix-bar .seg { min-width: 1px; }
+}
+
+@media (max-width: 400px) {
+  .metric.accounts-metric .possible-issues-cta { max-width: 45%; font-size: .64rem; }
+  .metric.accounts-metric .acct-legend .mix-bar { width: calc(100% - 22px); }
+}
 .metric .badge-inline.possible { background:#2c3541; color:#ffb347; border-color:#3d4a57; }
 .metric.status-warn .badge-inline.possible { background:#473d23; color:#ffb347; border-color:#6a5a38; }
 .metric.status-attn .badge-inline.possible { background:#47232b; color:#ff6b6b; border-color:#6a3841; }
