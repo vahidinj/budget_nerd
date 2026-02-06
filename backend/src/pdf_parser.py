@@ -1,10 +1,31 @@
+"""PDF parsing helpers used by the backend."""
+
 import re
+from itertools import islice
 from datetime import datetime, date
 from typing import List, Tuple, Union, Literal, Optional, Iterable
 import pandas as pd
 import pdfplumber
 from collections import Counter
 from .utils import normalize_number
+from .constants import (
+    STATEMENT_PERIOD_RX,
+    DATE_START_RX,
+    AMOUNT_TOKEN_RX,
+    YEAR_IN_RANGE_RX,
+    ACCOUNT_HEADER_RX,
+    ACCOUNT_HEADER_INLINE_RX,
+    DATE_RANGE_RX,
+    HEADER_FOOTER_PATTERNS_RX,
+    DATE_PREFIX_RX,
+    CREDIT_CARD_DETECT_PATTERNS,
+    CC_TXN_LINE_RX,
+    CC_PAYMENT_KEYWORDS,
+    CC_CREDIT_KEYWORDS,
+    DATE_FORMATS,
+    SKIP_DESC,
+    SKIP_CONTAINS,
+)
 
 __all__ = [
     "parse_bank_statement",
@@ -17,109 +38,11 @@ __all__ = [
 ]
 
 
-STATEMENT_PERIOD_RX = re.compile(
-    r"""
-    (?:
-        Statement \s+ Period .*?
-    )?
-    (\d{1,2}[/-]\d{1,2}[/-](\d{2,4}))
-    \s*-\s*
-    (\d{1,2}[/-]\d{1,2}[/-](\d{2,4}))
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
-DATE_START_RX = re.compile(
-    r"""
-    ^(?P<date>
-        \d{1,2} [/-] \d{1,2}
-        (?: [/-] \d{2,4} )?
-    )
-    (?!\s*-\s*\d{1,2}[/-]\d{1,2})
-    \b
-    """,
-    re.VERBOSE,
-)
-
-AMOUNT_TOKEN_RX = re.compile(
-    r"""
-    ^ 
-    (?:
-        \( (?P<num_paren> \$? (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? ) \)
-        |
-        (?P<sign>-)? \$? (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? (?P<trail_minus>-)?
-    )$
-    """,
-    re.VERBOSE,
-)
-
-YEAR_IN_RANGE_RX = re.compile(
-    r"""
-    \b
-    \d{1,2} [/-] \d{1,2} [/-] (\d{2,4})
-    \b
-    """,
-    re.VERBOSE,
-)
-
-ACCOUNT_NAME_NUMBER_CORE = r"""
-(?P<name>
-    [A-Za-z&'./-]+
-    (?:\s+[A-Za-z&'./-]+)*
-)
-\s* - \s*
-(?P<number>\d{6,})\b
-"""
-ACCOUNT_HEADER_RX = re.compile(rf"^\s*{ACCOUNT_NAME_NUMBER_CORE}", re.VERBOSE)
-ACCOUNT_HEADER_INLINE_RX = re.compile(ACCOUNT_NAME_NUMBER_CORE, re.VERBOSE)
-
-DATE_RANGE_RX = re.compile(
-    r"""
-    ^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}
-    \s*-\s*
-    \d{1,2}[/-]\d{1,2}[/-]\d{2,4}$
-    """,
-    re.VERBOSE,
-)
-
-HEADER_FOOTER_PATTERNS_RX = [
-    re.compile(r"^Page \s+\d+ \s+ of \s+ \d+$", re.IGNORECASE | re.VERBOSE),
-    re.compile(r"^Statement \s+ Period$", re.IGNORECASE | re.VERBOSE),
-    re.compile(r"^Statement \s+ of \s+ Account$", re.IGNORECASE | re.VERBOSE),
-]
-
-# Hoisted date prefix regex (used in wrapped-line merging) so it's compiled once
-DATE_PREFIX_RX = re.compile(r"^\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b")
-
-
-SKIP_DESC = ["Beginning Balance", "Ending Balance"]
-SKIP_CONTAINS = ["Average Daily Balance", "Beginning Balnce", "Ending Balance"]
-
-DATE_FORMATS: Tuple[str, ...] = (
-    "%m-%d-%Y",
-    "%m-%d-%y",
-    "%d-%m-%Y",
-    "%d-%m-%y",
-    "%m/%d/%Y",
-    "%m/%d/%y",
-    "%d/%m/%Y",
-    "%d/%m/%y",
-)
-
-
 def classify_account(name: str | None) -> str | None:
-    """Classify an account name into ONLY 'checking' or 'savings'.
-
-    All variants (money market, share, mmsa, mm, etc.) are normalized to
-    one of two buckets required by the downstream app:
-      - "checking"
-      - "savings"
-
-    If heuristics fail to identify a checking keyword, the fallback is "savings".
-    """
-    if not name:
+    """Normalize account name to 'checking' or 'savings'."""
+    if not name or not isinstance(name, str):
         return None
-    n = name.lower()
+    n = name.lower().strip()
     n_norm = re.sub(r"[^a-z0-9 ]+", " ", n)
     # Identify checking style names first
     if (
@@ -142,36 +65,18 @@ def classify_account(name: str | None) -> str | None:
     return "savings"
 
 
-# ---- Credit card specific helpers ----
-CREDIT_CARD_DETECT_PATTERNS = [
-    re.compile(r"Minimum Payment Due", re.IGNORECASE),
-    re.compile(r"Credit Limit", re.IGNORECASE),
-    re.compile(r"Statement Closing Date", re.IGNORECASE),
-]
-
-CC_TXN_LINE_RX = re.compile(
-    r"^(?P<trans_date>\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+"  # transaction date
-    r"(?P<post_date>\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+"  # post date
-    r"(?P<ref>\d{8,})\s+"  # long reference number
-    r"(?P<rest>.+?)\s+\$?(?P<amount>[0-9,]+(?:\.\d{2})?)$"  # description + amount
-)
-
-CC_SECTION_HEADER_RX = re.compile(
-    r"^(TRANSACTIONS|PAYMENTS AND CREDITS|TOTAL .*|Rewards Details|REWARD POINT SUMMARY)$",
-    re.IGNORECASE,
-)
-
-CC_PAYMENT_KEYWORDS = ["PAYMENT RECEIVED"]
-CC_CREDIT_KEYWORDS = ["CREDIT", "REFUND"]
-
-
 def detect_credit_card(lines: Iterable[str]) -> bool:
     """Light heuristic to detect credit-card statements.
 
-    Stops early once 2 distinct CC indicator patterns are found.
+    Stops early once 2 distinct CC indicator patterns are found. Accepts any
+    iterable of strings; will only examine the first 120 items.
     """
+    if lines is None:
+        return False
     score = 0
-    for ln in list(lines)[:120]:  # first couple of pages is ample
+    for ln in islice(lines, 120):
+        if not isinstance(ln, str):
+            ln = str(ln)
         for rx in CREDIT_CARD_DETECT_PATTERNS:
             if rx.search(ln):
                 score += 1
@@ -188,11 +93,7 @@ def parse_line_credit(
     account_type: str | None,
     date_order: str | None = None,
 ):
-    """Parse a credit-card style transaction line with two dates and a reference.
-
-    Returns a dict compatible with the bank statement parser or None.
-    Amount polarity: purchases -> positive (outflow / increase liability), payments & credits -> negative.
-    """
+    """Parse a credit-card style transaction line and return a record or None."""
     m = CC_TXN_LINE_RX.match(line)
     if not m:
         return None
@@ -262,13 +163,7 @@ def infer_year(all_lines: list[str]) -> int | None:
 def parse_date(
     raw: str, default_year: int | None, date_order: str | None
 ) -> Union[date, str]:
-    """
-    Parse date strings like:
-    - 07-23 (infer year & ordering)
-    - 07/23/25
-    - 23/07/2025
-    Returns date | original raw on failure.
-    """
+    """Parse various short/long date formats; return date or raw on failure."""
     parts = re.split(r"[/-]", raw)
     if len(parts) == 2 and default_year:
         try:
@@ -308,18 +203,7 @@ def extract_raw_lines(
     include_coords: bool = False,
     drop_header_footer: bool = True,
 ) -> List[Tuple[int, str]]:
-    """
-    Extract lines from a PDF.
-
-    Parameters:
-        mode: "raw" (use extract_text lines) or "words" (reconstruct via word boxes)
-        merge_wrapped: attempt to merge continuation lines (long descriptions)
-        include_coords: if True and mode="words", attaches coords internally (still returns (page, text) outward)
-        drop_header_footer: drop lines matching known header/footer regexes
-
-    Returns:
-        List[(page_number, line_text)]
-    """
+    """Extract textual lines from a PDF (returns list of (page, text))."""
     lines: List[Tuple[int, str]] = []
     try:
         with pdfplumber.open(pdf_file) as pdf:
@@ -721,15 +605,7 @@ def parse_bank_statement(
 
 # ---------------- Additional heuristics & helpers ---------------- #
 def infer_date_order(lines: List[str]) -> Optional[Literal["MD", "DM"]]:
-    """Infer ambiguous date ordering (month-day vs day-month) from sample lines.
-
-    Strategy:
-      - Scan up to first 400 lines for leading date tokens without an explicit year.
-      - If any token has first segment > 12 -> treat as day-month (DM).
-      - If any token has second segment > 12 with first <= 12 -> month-day (MD).
-      - If both patterns appear, fall back to None (ambiguous) so downstream keeps default.
-      - If only ambiguous (both <=12) tokens observed, return None.
-    """
+    """Infer whether dates are MD or DM from sample lines, or return None."""
     dm_flag = False
     md_flag = False
     for ln in lines[:400]:
@@ -759,10 +635,7 @@ def infer_date_order(lines: List[str]) -> Optional[Literal["MD", "DM"]]:
 
 
 def compute_balance_mismatches(df: pd.DataFrame, tolerance: float = 0.01) -> list[dict]:
-    """Return list of mismatches where provided balance != prior balance + amount.
-
-    Requires columns: date, amount, balance, account_number, line_type.
-    """
+    """Find rows where balance does not match prior balance + amount."""
     mismatches: list[dict] = []
     if df.empty:
         return mismatches

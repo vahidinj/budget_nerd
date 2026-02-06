@@ -86,10 +86,10 @@ export function buildConsistencyReport(transactions: TxnLike[]): ConsistencyRepo
   }
 
   if (probableTransfers > 0) {
-    issues.push({ level: 'info', message: `${probableTransfers} probable transfer pair(s) detected; consider marking them 'Account Transfer'.` });
+    issues.push({ level: 'info', message: `${probableTransfers} probable transfer pair(s) detected. Consider categorizing as 'Account Transfer'.` });
   }
   if (duplicateAmountSameDayOppositeSign > 0) {
-    issues.push({ level: 'info', message: `${duplicateAmountSameDayOppositeSign} same‑day opposite‑sign duplicate amount pair(s) found (often transfers).` });
+    issues.push({ level: 'info', message: `${duplicateAmountSameDayOppositeSign} same-day opposite-sign amount pair(s) found, often transfers.` });
   }
   if (creditCardPaymentPairs > 0) {
     issues.push({ level: 'info', message: `${creditCardPaymentPairs} credit card payment transfer pair(s) detected.` });
@@ -98,7 +98,7 @@ export function buildConsistencyReport(transactions: TxnLike[]): ConsistencyRepo
     issues.push({ level: 'warn', message: `${suspiciousIncomePositives} positive checking entries may be transfers mis-labeled as Income.` });
   }
   if (inconsistentCategories > 0) {
-    issues.push({ level: 'warn', message: `${inconsistentCategories} transaction(s) have category signs inconsistent with amount direction.` });
+    issues.push({ level: 'warn', message: `${inconsistentCategories} transaction(s) have categories mismatched with amount direction.` });
   }
   if (Object.keys(accountTypeCounts).length > 1) {
     issues.push({ level: 'info', message: `Multiple account types present: ${Object.entries(accountTypeCounts).map(([k,v])=>`${k}:${v}`).join(', ')}` });

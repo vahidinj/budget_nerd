@@ -7,8 +7,7 @@ interface Props {
   className?: string;
   children: React.ReactNode;
   onMount?: (node: HTMLDivElement | null) => void;
-  // optional offset (y pixels) between anchor bottom and popover
-  offset?: number;
+  offset?: number; // Pixel offset between anchor bottom and popover
 }
 
 const POPOVER_WIDTH = 260; // matches existing CSS default
@@ -29,9 +28,7 @@ const PortalPopover: React.FC<Props> = ({ anchorRef, isOpen, className, children
       const scrollY = window.scrollY || window.pageYOffset;
       const scrollX = window.scrollX || window.pageXOffset;
       const top = rect.bottom + offset + scrollY;
-      // align right edge of popover with anchor right edge
       let left = rect.right + scrollX - POPOVER_WIDTH;
-      // ensure visible within viewport with small padding
       const pad = 8;
       if (left < pad) left = pad + scrollX;
       if (left + POPOVER_WIDTH > window.innerWidth - pad) left = Math.max(pad + scrollX, window.innerWidth - POPOVER_WIDTH - pad + scrollX);

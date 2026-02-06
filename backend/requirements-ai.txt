@@ -1,0 +1,5 @@
+# Optional AI categorization dependencies.
+# Not installed in Elastic Beanstalk by default (too large: pulls torch stack ~900MB).
+# Enable locally with: pip install -r backend/requirements-ai.txt && export USE_AI_CATEGORIES=1
+
+sentence-transformers==2.2.0

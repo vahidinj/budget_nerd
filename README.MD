@@ -1,10 +1,17 @@
 # Budget App
 
-Lightweight personal finance transaction parser + categorizer with a React (Vite + TypeScript) frontend and Python backend (FastAPI / parsing pipeline). Supports PDF bank statement ingestion, heuristic categorization into seven canonical buckets, and optional local embedding-based AI refinement (privacy-preserving) when enabled.
+Personal finance statement parser + categorizer with a React (Vite + TypeScript) frontend and a Python FastAPI backend. Supports PDF bank statement ingestion, heuristic categorization into seven canonical buckets, and optional OpenAI-powered refinement when enabled (descriptions only).
 
 ## Status
-Active development. AWS deployment uses Elastic Beanstalk for the backend (FastAPI) and AWS Amplify for the frontend (React).
+Active development. AWS deployment typically uses Elastic Beanstalk for the backend (FastAPI) and AWS Amplify for the frontend (React).
+
 ## Features (Current)
+- PDF bank statement ingestion and parsing on the backend
+- Rule-based categorization into seven canonical categories
+- Optional custom category rules via JSON or runtime injection
+- Unified financial overview (totals, averages, medians, net change)
+- Filters for date range, category, and search
+- Optional OpenAI refinement (opt-in, description-only, cached)
 
 ## Security & Secret Management
 
@@ -38,24 +45,29 @@ This section is an initial draft outlining how end‑user data is handled. It wi
 2. Backend parses PDF pages in memory; raw text and parsed results are not stored permanently by default.
 3. Transaction rows (date, description, amount, inferred meta) are held in-memory for the session and used to generate analytics.
 4. Heuristic categorization is applied immediately on the backend.
-5. (Optional) AI refinement: If `USE_AI_CATEGORIES=1`, a locally loaded embedding model running on the backend re-scores select broad categories; no external calls are made for categorization.
+5. (Optional) AI refinement: If `USE_AI_CATEGORIES=1` and `OPENAI_API_KEY` are set, transaction descriptions are sent to the OpenAI API for refinement; PDFs and full statement text are never sent.
 6. Result returned to the frontend over HTTPS; frontend renders analytics. No background transmission elsewhere by default.
 
 ### What Is NOT Done (By Default)
 - No persistent storage of PDFs or parsed transactions (unless an explicit persistence mode is later enabled).
-- No transmission of financial data to external AI or SaaS APIs for categorization.
+- No transmission of financial data to external AI or SaaS APIs for categorization unless you explicitly enable AI refinement.
 - No logging of full raw descriptions or amounts (only high-level events if logging is later added; currently none persisted by default).
 - No cross-user data sharing or multi-tenant aggregation features.
 
 ### Optional AI Categorization Privacy
-The embedding model (`all-MiniLM-L6-v2`) is downloaded once (build or cold start) and then used locally. If dependencies fail to load, the system silently falls back to heuristic rules—ensuring no data exfiltration risk from model load errors.
+If enabled, the backend sends only transaction descriptions (e.g., "STARBUCKS #1234") to OpenAI for category refinement. The PDF file and full statement text never leave your system. Results are cached per description to reduce API calls.
 
 ### Environment / Configuration Variables
 | Variable | Purpose | Default | Privacy Impact |
 |----------|---------|---------|----------------|
-| `USE_AI_CATEGORIES` | Enable local embedding refinement | unset (off) | None when off; local only when on |
-| `AI_MIN_CONF` | Margin threshold to accept AI override | `0.05` | Adjusts aggressiveness, no external effect |
+| `USE_AI_CATEGORIES` | Enable OpenAI refinement | unset (off) | None when off; description-only when on |
+| `OPENAI_API_KEY` | OpenAI API key (required if AI enabled) | unset | Enables external API calls for descriptions |
+| `OPENAI_MODEL` | OpenAI model to use | `gpt-3.5-turbo` | Affects cost/accuracy only |
 | `CATEGORY_RULES_FILE` | Path to JSON with custom regex rules | unset | Only read locally; ensure secure path |
+| `CUSTOM_CATEGORY_RULES` | JSON rules file path (alternate) | unset | Only read locally; ensure secure path |
+| `API_CORS_ORIGINS` | Comma-separated CORS origins | unset | Controls browser access only |
+| `API_TRUSTED_HOSTS` | Allowed hostnames | `mybudgetnerd.com,...` | Server safety only |
+| `MAX_PARSE_TRANSACTIONS` | Cap parsing volume | `5000` | Performance safety only |
 
 ### Planned Hardening Before AWS
 - Add warm-up hook & readiness probes (avoid variable cold start timing)
@@ -87,14 +99,17 @@ If persistent storage is later implemented, add endpoints to:
 - Final legal Privacy Policy text pending.
 
 ## Local Development (Brief)
-backend (example):
+Backend (example):
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export USE_AI_CATEGORIES=1  # optional
-# The canonical FastAPI entrypoint is `api:app` (module `backend/src/api.py`)
-uvicorn api:app --reload
+# Optional AI refinement (requires OpenAI client)
+pip install openai
+export USE_AI_CATEGORIES=1
+export OPENAI_API_KEY=sk-your_key_here
+# The FastAPI entrypoint is `src.api:app` (module `backend/src/api.py`)
+uvicorn src.api:app --reload
 ```
 
 Frontend (example):
@@ -118,8 +133,8 @@ npm run dev
 - Amplify provides hosting, SSL, and CI/CD from your repo.
 
 ### General AWS Notes
-- The repo includes `docker-compose.yml`, `backend/Dockerfile`, and `frontend/Dockerfile` for local container builds.
-- The nginx config proxies `/api/` to a `backend` service when running with docker-compose. In production, ensure the frontend is configured to call the correct API endpoint (Elastic Beanstalk backend URL).
+- The repo includes a root `Dockerfile` for container builds.
+- In production, ensure the frontend is configured to call the correct API endpoint (Elastic Beanstalk backend URL).
 
 ## Deployment
 
@@ -131,6 +146,18 @@ Local Docker (development)
 docker-compose build
 docker-compose up
 ```
+
+### Frontend (Amplify) + Backend (App Runner) Split
+
+The React frontend can be deployed independently on AWS Amplify (static hosting). The FastAPI backend can run as a container on AWS App Runner.
+
+1. Deploy the backend container to App Runner.
+2. In Amplify console, set environment variable `VITE_API_BASE` to the App Runner service base URL (e.g. `https://abc123.us-east-1.awsapprunner.com`). Do NOT include a trailing slash.
+3. Rebuild Amplify. The frontend constructs API calls with:
+	- Production: `https://.../parse` (etc.)
+	- Local dev (no `VITE_API_BASE`): `/api/parse` which is proxied to `localhost:8000` by `vite.config.ts`.
+
+Optional additional origins for CORS may be appended via backend env var `API_CORS_ORIGINS` (comma separated). The backend already includes `mybudgetnerd.com` and `www.mybudgetnerd.com` in production.
 
 
 
@@ -145,5 +172,3 @@ date, contact: `deanjx2015@gmail.com`.
 
 See `LICENSE` and `LICENSE-COMMERCIAL.md` for details.
 
----
-Draft privacy section included above—flag anything you’d like changed or expanded before finalization.

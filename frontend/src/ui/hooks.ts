@@ -1,12 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
-// ----------------------------------------------
-// Debounce
-// ----------------------------------------------
-/**
- * Debounce a rapidly changing value. Returns the debounced value only after
- * no changes have occurred for `delay` milliseconds.
- */
 export const useDebouncedValue = <T,>(value: T, delay: number) => {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -26,9 +19,7 @@ export interface WindowedResult<T> {
   viewportHeight: number;
 }
 
-// ----------------------------------------------
-// Simple manual virtualization / windowing
-// ----------------------------------------------
+// Virtual scrolling for large transaction lists (performance optimization)
 export const useWindowedRows = <T,>(
   rows: T[],
   rowHeight = 32,
@@ -61,7 +52,7 @@ export const useWindowedRows = <T,>(
     return { slice, offsetY: start * rowHeight, startIndex: start };
   }, [scrollTop, rowHeight, overscan, effectiveViewport, maxRender, rows, total]);
 
-  // ResizeObserver to auto-measure container height (improves responsiveness in flex layouts)
+  // Auto-measure container height for responsive viewport
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -83,9 +74,7 @@ export const useWindowedRows = <T,>(
   return { containerRef, onScroll, slice, offsetY, startIndex, total, viewportHeight: effectiveViewport };
 };
 
-// ----------------------------------------------
-// Polling
-// ----------------------------------------------
+// Periodic polling for status checks
 interface PollingController {
   trigger: () => void;       // manually invoke immediately and reschedule
   stop: () => void;          // pause further polling

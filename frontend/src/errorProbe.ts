@@ -30,7 +30,7 @@
   });
   window.addEventListener('unhandledrejection', (e) => {
     const reason: any = e.reason;
-    let msg = typeof reason === 'string' ? reason : (reason?.message || String(reason));
+    const msg = typeof reason === 'string' ? reason : (reason?.message || String(reason));
     inject('PromiseRejection', msg, reason?.stack ? reason.stack.split('\n').slice(0,6).join('\n') : undefined);
   });
 })();

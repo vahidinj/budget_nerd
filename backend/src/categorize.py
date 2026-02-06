@@ -1,28 +1,4 @@
-"""Generic 7‑bucket transaction categorization.
-
-Goal: collapse many granular vendor/style tags into the most common, broadly
-useful personal finance groupings while remaining easily extensible.
-
-Canonical categories (exactly seven):
-  1. Housing          (mortgage, rent, home improvement)
-  2. Transportation   (fuel, rideshare, transit, parking, auto loan)
-  3. Food             (groceries + dining / restaurants)
-  4. Utilities        (telecom, internet, electricity, water, core services)
-  5. Health           (medical, pharmacy, insurance)
-  6. Recreation       (shopping discretionary, entertainment, travel, subs)
-  7. Finance          (income, transfers, refunds, fees, interest, charity, education, other financial adjustments)
-
-Any description that does not match a rule falls back to "Finance" only if it
-looks like a financial adjustment (ACH/TRANSFER/INT/REFUND etc.) else to
-"Recreation" as the broad discretionary bucket; this keeps the count at seven.
-
-Extensibility:
-  * Environment variable CATEGORY_RULES_FILE (JSON) can supply overrides:
-        { "Housing": ["REGEX1", "REGEX2"], ... }
-    These replace (not merge) the default patterns for listed categories.
-  * A helper `register_custom_rule(category, pattern, prepend=False)` allows
-    runtime injection (e.g. UI-driven user tagging) without editing this file.
-"""
+"""Seven-category transaction categorization and extensibility helpers."""
 
 from __future__ import annotations
 import os
@@ -41,21 +17,19 @@ from typing import (
     TYPE_CHECKING,
 )
 
+from .constants import (
+    CANONICAL_CATEGORIES,
+    DEFAULT_CATEGORY_REGEX,
+    BALANCE_SKIP_RX,
+    FINANCE_FALLBACK_RX,
+    TRANSFER_RX,
+)
+
 if TYPE_CHECKING:
     # Only import pandas for type checking to avoid hard runtime dependency at import time
     import pandas as pd  # type: ignore
 
 CategoryName = str
-
-CANONICAL_CATEGORIES: List[CategoryName] = [
-    "Housing",
-    "Transportation",
-    "Food",
-    "Utilities",
-    "Health",
-    "Recreation",
-    "Finance",
-]
 
 
 class CategoryRule(NamedTuple):
@@ -67,115 +41,11 @@ _custom_rules: List[CategoryRule] = []  # user/runtime injected
 _custom_rules_lock = RLock()
 _custom_rules_persist_path: str | None = None
 
-# Default vendor / keyword patterns grouped per canonical category.
-DEFAULT_CATEGORY_REGEX: Dict[CategoryName, List[str]] = {
-    "Housing": [
-        r"\b(MORTGAGE|RENT|HOME ?LOAN|LOAN PAYMENT)\b",
-        r"\b(LOWE'S|HOME DEPOT|MENARDS)\b",
-        r"\b(HOA|PROPERTY TAX|APARTMENT|APT\b|LEASE PAYMENT)\b",
-        r"\b(IKEA|WAYFAIR|OVERSTOCK|ASHLEY FURNITURE|FURNITURE)\b",
-        r"\b(HVAC|PLUMB(ER|ING)|ELECTRICIAN|ROOF(ING)?|PEST CONTROL)\b",
-        r"\b(LAWN CARE|LANDSCAPING|GARDEN CENTER|HOME IMPROVEMENT)\b",
-        r"\b(SECURITY SYSTEM|ADT SECURITY|RING SUBSCRIPTION)\b",
-    ],
-    "Transportation": [
-        r"\b(LYFT|UBER|METRO|SUBWAY|TRAIN|PARKING|TOLL)\b",
-        r"\b(SHELL|EXXON|CHEVRON|BP|GAS STATION|FUEL)\b",
-        r"\b(AUTO LOAN|CAR PAYMENT|CAR WASH)\b",
-        r"\b(AUTOZONE|O'REILLY|ADVANCE AUTO|NAPA AUTO|AUTO PARTS)\b",
-        r"\b(OIL CHANGE|MECHANIC|TIRES?|TIRE KING|DISCOUNT TIRE)\b",
-        r"\b(U-?HAUL|RENTAL CAR|ENTERPRISE RENT|HERTZ|AVIS|BUDGET RENTAL)\b",
-        r"\b(DMV|VEHICLE REG(ISTRATION)?|EMISSIONS TEST|SMOG CHECK)\b",
-        r"\b(EV CHARGE|CHARGING STATION|SUPERCHARGER)\b",
-        # Automotive finance / payment descriptors (e.g. "Chase Automotive Online Pmt")
-        r"\b(CHASE AUTOMOTIVE|AUTOMOTIVE|AUTO FINANCE|AUTO PMT|AUTO PAYMENT)\b",
-    ],
-    "Food": [
-        r"\b(WALMART|SAFEWAY|KROGER|WHOLE ?FOODS|TRADER JOE'S|ALDI|LIDL|PUBLIX)\b",
-        r"\b(STARBUCKS|UBER EATS|DOORDASH|GRUBHUB|CAFE|DINER|PIZZA|CHIPOTLE|MCDONALD|BURGER KING|SUBWAY|TACO BELL|RESTAURANT)\b",
-        r"\b(COSTCO|SAM'S CLUB|SAMS CLUB|BJ'S WHOLESALE|WHOLESALE CLUB)\b",
-        r"\b(PANERA|WENDY'S|KFC|POPEYES|DOMINO'S|DOMINOS|DUNKIN|JIMMY JOHN'S)\b",
-        r"\b(GROCERY|SUPERMARKET|MARKETPLACE|FARMERS MARKET)\b",
-        r"\b(LIQUOR|WINERY|DISTILLERY|BEER STORE|ALCOHOL)\b",
-        r"\b(INSTACART|MEAL KIT|BLUE APRON|HELLOFRESH|DOOR DASH)\b",
-        r"\b(FRESH MARKET|D&W FRESH MARKET|D&W FRESH)\b",
-        r"\b(MEIJER|H\.?E\.?B\.?|HEB|SHOPRITE|SHOP RITE|STOP ?& ?SHOP|FOOD LION)\b",
-        r"\b(GIANT EAGLE|GIANT\b|HARRIS TEETER|SPROUTS|WINCO|RALPHS|KING SOOPERS)\b",
-        r"\b(FRY'S FOOD|FRY'S|FRYS FOOD|JEWEL(?:-?OSCO)?|PIGGLY WIGGLY|MARKET BASKET|ALBERTSONS?)\b",
-        r"\b(SPROUTS FARMERS MARKET|BUTCHER SHOP|DELI)\b",
-    ],
-    "Utilities": [
-        r"\b(COMCAST|XFINITY|VERIZON|T-MOBILE|AT&T|ATT\b|ELECTRIC|UTILITY|WATER BILL|GAS BILL|INTERNET)\b",
-        r"\b(TRASH|WASTE|SEWER)\b",
-        r"\b(DUKE ENERGY|PG&E|PGE|CON EDISON|NATIONAL GRID|SCE|ELECTRIC BILL)\b",
-        r"\b(SPECTRUM|CHARTER|COX COMMUNICATIONS|DIRECTV|DISH NETWORK)\b",
-        r"\b(NATURAL GAS|GAS SERVICE|WATER SERVICE|UTILITY BILL)\b",
-        r"\b(SOLAR LEASE|SOLAR CITY|SUNRUN)\b",
-        r"\b(HOSTING|CLOUD STORAGE|GOOGLE WORKSPACE|MICROSOFT 365)\b",
-    ],
-    "Health": [
-        r"\b(PHARMACY|CVS|WALGREENS|DENTAL|DENTIST|ORTHO|HOSPITAL|MEDICAL|HEALTH|CLINIC)\b",
-        r"\b(INSURANCE|INS PREM|GEICO|STATE FARM|ALLSTATE|PROGRESSIVE)\b",
-        # Generic doctor / practitioner markers (avoid matching DRIVE etc by requiring word boundary and optional period)
-        r"\b(DR\.?\s+[A-Z]|DR\.?\b|M\.?D\.?\b|DDS\b|DPM\b|DO\b)",
-        r"\b(BLUE CROSS|BLUE SHIELD|AETNA|CIGNA|KAISER|UNITED HEALTH)\b",
-        r"\b(OPTUM|LABCORP|QUEST DIAGNOSTICS|RADIOLOGY|IMAGING CENTER)\b",
-        r"\b(PHYSICAL THERAPY|PT VISIT|OCCUPATIONAL THERAPY|SPEECH THERAPY)\b",
-        r"\b(URGENT CARE|WALK-IN CLINIC|EMERGENCY ROOM|ER VISIT)\b",
-        r"\b(VISION CENTER|OPTICAL|EYE CARE|DERMATOLOGY|PEDIATRIC|CARDIOLOGY)\b",
-    ],
-    "Recreation": [
-        r"\b(SPOTIFY|NETFLIX|HULU|DISNEY\+|APPLE MUSIC|GAMESTOP|STEAM|AMC)\b",
-        r"\b(HOTEL|MARRIOTT|HILTON|AIRBNB|DELTA|UNITED AIR|AMERICAN AIR|BOOKING\.COM|TRAVEL)\b",
-        r"\b(AMAZON|TARGET|BEST BUY|ETSY|EBAY|POS PURCHASE)\b",
-        r"\b(SUBSCRIPTION|SUBSCRIPT|RENEWAL|PLAN FEE)\b",
-        r"\b(YOUTUBE PREMIUM|PLAYSTATION|PSN|XBOX LIVE|EPIC GAMES|NINTENDO)\b",
-        r"\b(SOUTHWEST|JETBLUE|ALASKA AIR|FRONTIER AIR|RYANAIR|EASYJET)\b",
-        r"\b(TICKETMASTER|EVENTBRITE|STUBHUB|FANDANGO|LIVE NATION)\b",
-        r"\b(GOLF COURSE|SKI PASS|RESORT FEE|MUSEUM|THEME PARK)\b",
-        r"\b(GYM MEMBERSHIP|PILATES|YOGA STUDIO|DANCE CLASS)\b",
-    ],
-    "Finance": [
-        r"\b(PAYROLL|DIRECT DEP|DIR DEP|ACH CREDIT|SALARY|DEPOSIT|INCOME|PAYMENT FROM)\b",  # income
-        r"\b(TRANSFER|XFER|ACH DEBIT|ACH WITHDRAWAL|TO SAVINGS|FROM SAVINGS)\b",  # transfers
-        r"\b(REFUND|REVERSAL|RETURNED)\b",  # refunds
-        r"\b(OVERDRAFT|NSF|SERVICE CHARGE|MAINTENANCE FEE|FEE\b)\b",  # fees
-        r"\b(INTEREST|DIVIDEND)\b",  # interest / earnings
-        r"\b(LOAN PAYMENT|STUDENT LOAN|AUTO LOAN)\b",  # loan servicing
-        r"\b(TUITION|SCHOOL|UNIVERSITY|COLLEGE|CHARITY|DONATION|FOUNDATION)\b",  # misc financial/charitable
-        r"\b(VANGUARD|FIDELITY|SCHWAB|ROBINHOOD|ETRADE|MERRILL)\b",
-        r"\b(COINBASE|CRYPTO|BITCOIN|BLOCKFI)\b",
-        r"\b(ZELLE|VENMO|PAYPAL|CASH APP|APPLE CASH)\b",
-        r"\b(IRS PAYMENT|TAX PAYMENT|TAX REFUND|STATE TAX|FED TAX)\b",
-        r"\b(BILL PAY|AUTO PAY|DIRECT PAY|ELECTRONIC PAYMENT)\b",
-    ],
-}
-
-
-BALANCE_SKIP_RX = re.compile(
-    r"\b((BEGINNING|OPENING) BALANCE|(ENDING|CLOSING) BALANCE|BALANCE FORWARD|NEW BALANCE)\b",
-    re.IGNORECASE,
-)
-FINANCE_FALLBACK_RX = re.compile(
-    r"\b(ACH|TRANSFER|XFER|FEE|REFUND|INTEREST|DIVIDEND|DEPOSIT|PAYROLL)\b",
-    re.IGNORECASE,
-)
-TRANSFER_RX = re.compile(
-    r"\b(TRANSFER|XFER|TO SAVINGS|FROM SAVINGS|INTERNAL TRANSFER)\b",
-    re.IGNORECASE,
-)
-
 
 def register_custom_rule(
     category: CategoryName, regex: str, prepend: bool = False
 ) -> None:
-    """Register a custom regex rule at runtime.
-
-    Args:
-        category: One of CANONICAL_CATEGORIES (else ValueError).
-        regex:    Regex string (case-insensitive implied) applied to UPPER description.
-        prepend:  If True, rule evaluated before default rules of same category.
-    """
+    """Register a custom regex rule at runtime."""
     if category not in CANONICAL_CATEGORIES:
         raise ValueError(
             f"Unknown category '{category}'. Must be one of {CANONICAL_CATEGORIES}."
@@ -218,19 +88,14 @@ def _compile_rules() -> List[CategoryRule]:
                 rules.append(CategoryRule(cat, re.compile(rx, flags)))
             except re.error:
                 continue
-    # Custom rules appended (or prepended if specified via register_custom_rule)
-    # Custom precedence: inserted custom rules retain relative order but appear before standard rules of same category when prepend requested.
+    # Custom rules (user/runtime) are merged with defaults.
     if _custom_rules:
         rules = list(_custom_rules) + rules
     return rules
 
 
 def _heuristic_categorize(desc: str) -> str:
-    """Heuristic (regex) categorization for a single description.
-
-    Kept as a private function so the public `categorize_description` can wrap
-    it with optional AI refinement without duplicating logic or names.
-    """
+    """Private heuristic (regex) categorization for a description."""
     if not isinstance(desc, str) or not desc.strip():
         return "Recreation"  # neutral default for blank
     # Normalize description to remove noisy tokens (POS PURCHASE, DEBIT CARD ####, etc.)
@@ -251,10 +116,7 @@ def _heuristic_categorize(desc: str) -> str:
 
 
 def add_categories(df: "pd.DataFrame") -> "pd.DataFrame":
-    """Add a `category` column (categorical dtype) if absent.
-
-    Keeps existing `category` column intact. Safe on empty / missing description.
-    """
+    """Add a `category` column to a DataFrame if missing."""
     try:
         import pandas as pd  # lazy import
 
@@ -291,47 +153,56 @@ __all__ = [
     "DEFAULT_CATEGORY_REGEX",
 ]
 
-# ---------------- Optional AI Enhancement (privacy-preserving) ---------------- #
-"""AI Category Enhancement
+# ---------------- Optional AI Enhancement via OpenAI API ---------------- #
+"""AI Category Enhancement using OpenAI
 
 If the environment variable USE_AI_CATEGORIES is set to a truthy value (e.g. "1"),
-an additional embedding-based classifier refines (or replaces) heuristic results.
+transaction DESCRIPTIONS ONLY are sent to OpenAI's API to predict categories.
+
+⚠️  IMPORTANT PRIVACY NOTE:
+  * The original PDF file is NEVER sent to OpenAI.
+  * Only the extracted transaction description (e.g., "STARBUCKS #1234") is sent.
+  * The description is a sanitized merchant name - no sensitive user data is included.
+  * No account numbers, balances, personal info, or raw PDF content leaves your system.
+
+Flow:
+  1. PDF is parsed locally on your server/container
+  2. Transaction descriptions are extracted locally
+  3. Only the description text is sent to OpenAI for categorization
+  4. Result is cached locally to minimize future API calls
+  5. The PDF file never leaves your system
 
 Design goals:
-  * Privacy: All inference local; no network calls after model download.
-  * Safety: If model or dependency missing, silently fallback to heuristic.
-  * Performance: Cache embeddings per unique description (case-insensitive key).
-  * Determinism: Embedding similarity; no randomness.
-
-Current refinement behavior (2025-08-31):
-    The embedding model now evaluates EVERY non-blank heuristic category result.
-    Previously only Recreation/Finance were refined. Balance roll-forward lines
-    still return an empty string and bypass AI.
+  * Privacy-first: Only descriptions sent, no PDF or sensitive data.
+  * Simple integration: Just transaction description text.
+  * Configurable: Use your own OpenAI API key via OPENAI_API_KEY.
+  * Graceful fallback: If API fails or not configured, silently uses heuristic.
+  * Cached: Caches results per unique description to minimize API calls.
 
 Configuration via environment variables:
   USE_AI_CATEGORIES=1              -> enable feature
-  AI_CATEGORY_MODE=embedding       -> (default) lightweight sentence-transformers
-  AI_MIN_CONF=0.05                 -> minimum cosine delta over heuristic to override
+  OPENAI_API_KEY=sk-...           -> your OpenAI API key (required if USE_AI_CATEGORIES=1)
+  OPENAI_MODEL=gpt-3.5-turbo      -> (default) model to use
 
-To pre-download the model for Azure deployment (so build image has it and runtime
-avoids outbound fetch), run the helper script `python -m download_models` or invoke
-`warm_ai_category_model()` during startup with USE_AI_CATEGORIES=1.
+Cost: Each categorization uses ~20 tokens. Monitor usage at https://platform.openai.com/usage
 """
 
-_EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-_ai_model = None  # lazy
-_ai_cat_labels = CANONICAL_CATEGORIES
-_ai_cat_prompts = [
-    "Housing costs: mortgage rent home improvement repairs",
-    "Transportation: fuel gas rideshare transit parking vehicle loan",
-    "Food: groceries supermarkets dining restaurants cafes delivery",
-    "Utilities: electricity water gas internet phone trash sewer",
-    "Health: medical pharmacy insurance dental hospital wellness",
-    "Recreation: shopping entertainment travel leisure subscription streaming",
-    "Finance: income payroll deposit transfer refund interest fee loan charity",
-]
+try:
+    import openai
+except ImportError:
+    openai = None  # type: ignore
+
+_openai_client = None  # lazy
+_openai_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+_openai_cache: dict[str, str] = {}  # desc -> category
+_ai_model = None
 _ai_cat_emb = None
-_desc_emb_cache: dict[str, tuple[str, float]] = {}
+_desc_emb_cache: dict[str, object] = {}
+_ai_status_cache: dict[str, object] = {
+    "last_checked": None,
+    "last_ok": None,
+    "last_error": None,
+}
 
 
 # ---------------- Persistent Custom Rules (optional) ---------------- #
@@ -399,28 +270,100 @@ def _use_ai() -> bool:
     return val in {"1", "true", "yes", "on"}
 
 
-def _load_embed_model():  # lazy import guarded by flag
-    global _ai_model, _ai_cat_emb
-    if _ai_model is not None:
-        return
+def _get_openai_client():
+    """Lazy-load and configure OpenAI client if available."""
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    if openai is None:
+        return None
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-
-        _ai_model = SentenceTransformer(_EMBED_MODEL_NAME)
-        _ai_cat_emb = _ai_model.encode(_ai_cat_prompts, normalize_embeddings=True)
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        _openai_client = openai.OpenAI(api_key=api_key)
+        return _openai_client
     except Exception:
-        _ai_model = None
-        _ai_cat_emb = None
+        return None
 
 
 def warm_ai_category_model():
-    """Explicitly load the embedding model (optional)."""
-    if _use_ai():
-        _load_embed_model()
+    """Lightweight OpenAI validation (no-op if not configured)."""
+    if not _use_ai():
+        return
+    client = _get_openai_client()
+    if client is None:
+        import logging
+
+        logging.getLogger("statement_api").warning(
+            "AI categorization requested but OPENAI_API_KEY is not set or client unavailable"
+        )
+        return
+    try:
+        # Lightweight validation: attempt a trivial completion
+        client.chat.completions.create(
+            model=_openai_model,
+            messages=[{"role": "user", "content": "Hello"}],
+            max_tokens=1,
+            temperature=0,
+        )
+        logging.getLogger("statement_api").info(
+            "OpenAI API validated for categorization"
+        )
+    except Exception as e:
+        logging.getLogger("statement_api").warning(
+            "OpenAI API validation failed: %s", str(e)
+        )
+
+
+def _validate_openai_connection() -> tuple[bool, str | None]:
+    """Attempt a minimal OpenAI call to confirm connectivity."""
+    if not _use_ai():
+        return False, "AI disabled"
+    client = _get_openai_client()
+    if client is None:
+        return False, "Client unavailable or API key missing"
+    try:
+        client.chat.completions.create(
+            model=_openai_model,
+            messages=[{"role": "user", "content": "Hello"}],
+            max_tokens=1,
+            temperature=0,
+        )
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def get_ai_status(validate: bool = False) -> Dict[str, Any]:
+    """Return AI/OpenAI connectivity status for UI display."""
+    enabled = _use_ai()
+    has_key = bool(os.environ.get("OPENAI_API_KEY"))
+    client_ready = _get_openai_client() is not None
+    status: Dict[str, Any] = {
+        "enabled": enabled,
+        "has_key": has_key,
+        "client_ready": client_ready,
+        "model": _openai_model,
+        "last_checked": _ai_status_cache.get("last_checked"),
+        "last_ok": _ai_status_cache.get("last_ok"),
+        "last_error": _ai_status_cache.get("last_error"),
+    }
+    if validate:
+        from time import time as _time
+
+        ok, err = _validate_openai_connection()
+        _ai_status_cache["last_checked"] = _time()
+        _ai_status_cache["last_ok"] = ok
+        _ai_status_cache["last_error"] = err
+        status["last_checked"] = _ai_status_cache["last_checked"]
+        status["last_ok"] = ok
+        status["last_error"] = err
+    return status
 
 
 def ai_refine_category(description: str, base_category: str) -> str:
-    """Backward-compatible wrapper returning only final category."""
+    """Backward-compatible wrapper returning only final category via OpenAI."""
     final, *_ = ai_refine_with_info(description, base_category)
     return final
 
@@ -430,11 +373,7 @@ def ai_refine_with_info(
     base_category: str,
     use_ai_override: bool | None = None,
 ) -> tuple[str, str | None, float | None, float | None]:
-    """Refine category and return (final, ai_candidate, margin, best_score).
-
-    ai_candidate is None if model unused or no change considered. margin/best_score
-    may be None if embedding unavailable.
-    """
+    """Use OpenAI to refine category; returns (final, ai_candidate, confidence, api_used)."""
     # Explicit override precedence: False disables regardless of env; True enables even if env flag off.
     if use_ai_override is False:
         return base_category, None, None, None
@@ -444,44 +383,62 @@ def ai_refine_with_info(
         or not description.strip()
     ):
         return base_category, None, None, None
-    _load_embed_model()
-    if _ai_model is None or _ai_cat_emb is None:
-        return base_category, None, None, None
-    key = description.strip().upper()
-    cached = _desc_emb_cache.get(key)
-    if cached:
-        # We only cached final category + score earlier; margin unknown here.
-        return cached[0], None, None, cached[1]
-    try:
-        emb = _ai_model.encode([description], normalize_embeddings=True)
-    except Exception:
-        return base_category, None, None, None
-    import numpy as np  # lazy import
 
-    sims = (emb @ _ai_cat_emb.T)[0]
-    best_idx = int(np.argmax(sims))
-    best_score = float(sims[best_idx])
-    sorted_scores = sorted(sims, reverse=True)
-    margin = best_score - float(sorted_scores[1]) if len(sorted_scores) > 1 else 1.0
-    min_conf = float(os.environ.get("AI_MIN_CONF", "0.05"))
-    ai_cat = _ai_cat_labels[best_idx]
-    if ai_cat != base_category and margin >= min_conf:
-        _desc_emb_cache[key] = (ai_cat, best_score)
-        return ai_cat, ai_cat, margin, best_score
-    _desc_emb_cache[key] = (base_category, best_score)
-    return (
-        base_category,
-        ai_cat if ai_cat != base_category else None,
-        margin,
-        best_score,
-    )
+    # Check cache first
+    key = description.strip().upper()
+    if key in _openai_cache:
+        cached_cat = _openai_cache[key]
+        confidence = 1.0 if cached_cat in CANONICAL_CATEGORIES else 0.0
+        return (
+            cached_cat,
+            cached_cat if cached_cat != base_category else None,
+            confidence,
+            1.0,
+        )
+
+    client = _get_openai_client()
+    if client is None:
+        return base_category, None, None, None
+
+    try:
+        prompt = f"""Categorize this transaction description into ONE of these categories: {", ".join(CANONICAL_CATEGORIES)}.
+
+Transaction: {description}
+
+Respond with ONLY the category name, nothing else."""
+
+        response = client.chat.completions.create(
+            model=_openai_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=20,
+        )
+
+        ai_cat = (
+            response.choices[0].message.content.strip()
+            if response.choices
+            else base_category
+        )
+
+        # Validate the response is a known category
+        if ai_cat not in CANONICAL_CATEGORIES:
+            ai_cat = base_category
+
+        # Cache the result
+        _openai_cache[key] = ai_cat
+
+        confidence = 1.0
+        if ai_cat != base_category:
+            return ai_cat, ai_cat, confidence, 1.0
+        return base_category, None, confidence, 1.0
+
+    except Exception:
+        # Silently fallback to heuristic if API call fails
+        return base_category, None, None, None
 
 
 def clear_all_caches() -> dict[str, int | bool]:
-    """Clear in-memory categorization caches & custom rules.
-
-    Returns a summary dict with counts of items cleared. Safe to call any time.
-    """
+    """Clear in-memory caches and custom rules; return a summary."""
     global _ai_model, _ai_cat_emb
     # Clear compiled rule cache & embedding description cache
     try:
@@ -509,10 +466,7 @@ def clear_all_caches() -> dict[str, int | bool]:
 
 
 def reload_rules() -> int:
-    """Clear compiled rule cache and force recompilation.
-
-    Returns the number of compiled rules after reload.
-    """
+    """Reload and return the number of compiled rules."""
     try:
         _compile_rules.cache_clear()  # type: ignore[attr-defined]
     except Exception:
@@ -535,13 +489,7 @@ def categorize_description(desc: str) -> str:  # type: ignore[override]
 
 
 def categorize_with_metadata(desc: str, use_ai: bool | None = None) -> Dict[str, Any]:
-    """Return rich categorization metadata for a single description.
-
-    Keys:
-      description, base_category (pre-AI heuristic), final_category, source,
-      matched_pattern, ai_original_category, ai_margin, ai_best_score, skipped (bool)
-    source in {skip, regex, fallback, ai} (override handled later).
-    """
+    """Return categorization metadata for a description."""
     info: Dict[str, Any] = {
         "description": desc,
         "base_category": None,
@@ -598,13 +546,7 @@ def categorize_with_metadata(desc: str, use_ai: bool | None = None) -> Dict[str,
 def categorize_records_with_overrides(
     records: list[dict], use_ai: bool | None = None
 ) -> list[Dict[str, Any]]:
-    """Categorize list of records returning metadata + overrides applied.
-
-    Adds keys:
-      override_applied (bool), transfer (bool), final_category (post-override)
-      original_final_category (pre-override), override_reason
-    Income/Savings overrides suppressed if description looks like an internal transfer.
-    """
+    """Categorize a list of records and apply simple overrides."""
     out: list[Dict[str, Any]] = []
     for rec in records:
         desc = (rec.get("description") or "") if isinstance(rec, dict) else ""
@@ -665,16 +607,7 @@ _NOISE_COMPILED = [re.compile(p) for p in _NOISE_PATTERNS]
 
 @lru_cache(maxsize=8192)
 def normalize_description(desc: str) -> tuple[str, str]:
-    """Return (normalized_display, normalized_for_rules_upper).
-
-    Steps:
-      * Preserve original (returned as-is in metadata separately by caller)
-      * Uppercase working copy (rule patterns expect word boundaries capital-insensitive)
-      * Remove common statement noise tokens (POS PURCHASE, DEBIT CARD ####, etc.)
-      * Collapse repeated whitespace
-    The first element is a cleaned lowercase display-friendly string (without noise),
-    second is the uppercase string used for rule matching.
-    """
+    """Return (display_normalized, uppercase_normalized_for_rules)."""
     if not isinstance(desc, str):
         return "", ""
     working = desc.upper()

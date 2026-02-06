@@ -1,0 +1,13 @@
+# Ignore everything not needed for backend container image
+frontend/
+.vscode/
+.venv/
+.git/
+.gitignore
+*.pyc
+__pycache__/
+*.log
+node_modules/
+*.zip
+*.tgz
+.DS_Store

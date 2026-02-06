@@ -1,0 +1,6 @@
+## Root requirements for Elastic Beanstalk deployment
+# Delegate to the backend's slim production dependency list.
+# This indirection keeps local tooling (frontend etc.) isolated while letting EB
+# auto-detect and install only what's needed for the API.
+
+-r backend/requirements.txt

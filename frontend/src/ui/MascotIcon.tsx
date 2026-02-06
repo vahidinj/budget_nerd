@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 type Props = {
   size?: number; // px
@@ -7,17 +7,29 @@ type Props = {
 };
 
 export const MascotIcon: React.FC<Props> = ({ size = 44, themeColor = '#ffd36b', className }) => {
+  const [isSaiyan, setIsSaiyan] = useState(false);
   const w = size;
   const h = size;
+
+  // Animation lasts 1.1s, then resets
+  const handleClick = () => {
+    if (!isSaiyan) {
+      setIsSaiyan(true);
+      setTimeout(() => setIsSaiyan(false), 1100);
+    }
+  };
+
   return (
     <svg
-      className={`mascot-icon ${className ?? ''}`.trim()}
+      className={`mascot-icon${isSaiyan ? ' mascot-saiyan-glow' : ''}${className ? ' ' + className : ''}`}
       xmlns="http://www.w3.org/2000/svg"
       width={w}
       height={h}
       viewBox="0 0 64 64"
       aria-hidden="true"
       focusable="false"
+      onClick={handleClick}
+      style={{ cursor: 'pointer' }}
     >
       <defs>
         <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
@@ -72,6 +84,31 @@ export const MascotIcon: React.FC<Props> = ({ size = 44, themeColor = '#ffd36b',
 
       {/* Glasses sheen */}
       <path d="M20 31c1-0.5 3-1 5-0.8" stroke="url(#g2)" strokeWidth="1.0" strokeLinecap="round" fill="none" opacity="0.95" />
+      {/* Super Saiyan Glow Overlay */}
+      {isSaiyan && (
+        <g>
+          <circle
+            cx="32"
+            cy="36"
+            r="20"
+            fill="none"
+            stroke="#ffe66a"
+            strokeWidth="4"
+            opacity="0.7"
+            style={{ filter: 'drop-shadow(0 0 18px #ffe66a) drop-shadow(0 0 32px #ffe66a)' }}
+          />
+          <circle
+            cx="32"
+            cy="36"
+            r="24"
+            fill="none"
+            stroke="#fff7b2"
+            strokeWidth="2.5"
+            opacity="0.35"
+            style={{ filter: 'drop-shadow(0 0 32px #fff7b2)' }}
+          />
+        </g>
+      )}
     </svg>
   );
 };

@@ -1,5 +1,3 @@
-// Sample ParseResponse object for demo mode (anonymized synthetic data)
-// Keep small to avoid bundle bloat.
 export const sampleData = {
   fileName: 'DEMO_SAMPLE.pdf',
   metrics: {
@@ -21,7 +19,6 @@ export const sampleData = {
     { date: '2025-07-08', description: 'GAS STATION', amount: -46.30, balance: 890.36, account_type: 'checking' },
     { date: '2025-07-08', description: 'SAVINGS TRANSFER IN', amount: 100.00, balance: 402.15, account_type: 'savings' },
     { date: '2025-07-09', description: 'REFUND MERCHANT', amount: 52.81, balance: 943.17, account_type: 'checking' },
-    // Credit card transactions
     { date: '2025-07-02', description: 'ONLINE RETAILER', amount: -120.00, balance: -120.00, account_type: 'credit_card' },
     { date: '2025-07-04', description: 'RESTAURANT', amount: -45.50, balance: -165.50, account_type: 'credit_card' },
     { date: '2025-07-06', description: 'CREDIT CARD PAYMENT', amount: 200.00, balance: 34.50, account_type: 'credit_card' },

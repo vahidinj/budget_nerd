@@ -1,14 +1,4 @@
-"""Plotly Express visualization helpers for the statement parser app.
-
-Goals of this module:
-    * Provide small, composable helpers returning fully‑styled, dark themed Plotly figures.
-    * Keep a consistent color palette with the frontend (React charts) for visual parity.
-    * Minimize repeated data wrangling (shared aggregation helpers where sensible).
-    * Fail soft: if required columns are missing, return an explanatory placeholder figure.
-
-All functions accept ``pandas.DataFrame`` objects and return a configured ``plotly.graph_objects.Figure``.
-They never mutate the caller's DataFrame (copy only when coercion needed).
-"""
+"""Plotly visualization helpers for the statement parser app."""
 
 from __future__ import annotations
 

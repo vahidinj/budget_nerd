@@ -1,10 +1,32 @@
-streamlit
-pandas
-matplotlib
-pdfplumber
-fastapi
-gunicorn
-uvicorn
-plotly
-sentence-transformers>=2.7.0
-python-multipart
+# Production (API-only) dependencies.
+#
+# Slimmed for Elastic Beanstalk to avoid large wheels (torch, torchvision, scipy stack)
+# that were previously pulled indirectly via sentence-transformers / visualization libs.
+#
+# Optional extras (NOT installed by default on EB):
+#   backend/requirements-ai.txt   -> sentence-transformers (pulls torch ~900MB)
+#   backend/requirements-viz.txt  -> plotly, matplotlib, (optional charts)
+#
+# To enable AI categories with OpenAI locally:
+#   export USE_AI_CATEGORIES=1
+#   export OPENAI_API_KEY=sk-...
+#
+# To enable visualization helpers locally:
+#   pip install -r backend/requirements-viz.txt
+#
+# If you accidentally need everything (local dev only):
+#   pip install -r backend/requirements.txt -r backend/requirements-viz.txt
+#
+# Pinned versions retained for reproducibility. Update deliberately.
+
+fastapi==0.95.0
+uvicorn[standard]==0.21.0
+gunicorn==20.1.0
+slowapi==0.1.9
+pdfplumber==0.7.6
+pydantic==1.10.11
+python-multipart==0.0.6
+pandas==1.5.0  # pulls numpy
+numpy==1.25.0
+openpyxl==3.1.2
+openai>=1.3.0  # For AI category prediction

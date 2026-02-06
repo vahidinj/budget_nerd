@@ -5,23 +5,16 @@ export const DragonBallHeader: React.FC = () => {
   return (
     <header className="dbz-header">
       <div className="logo-block">
-        <div className="logo">
-          <MascotIcon size={44} />
-          <span className="brand"> Budget Nerd</span>
-          <span className="domain">mybudgetnerd.com</span>
+        <MascotIcon size={36} />
+        <div className="logo-content">
+          <div className="logo-line">
+            <span className="brand">Budget Nerd</span>
+            <span className="version-chip" title="App version">v0.1</span>
+          </div>
+          <span className="tagline">🔒 Secure · Private · Ephemeral</span>
         </div>
-        <span className="version-chip" title="App version">v0.1</span>
       </div>
-      <div className="subtitle">
-        And this is to go even furher beyond ... with your Budgeting.
-      </div>
-      <div className="header-meta">
-        <span className="tagline">Secure · Private · Ephemeral</span>
-        <span className="secure-note" aria-hidden>🔒 Secure connection</span>
-      </div>
-      <div className="header-actions" aria-label="Quick actions">
-        {/* Future space for settings/help/theme toggle */}
-      </div>
+      <div className="header-actions" aria-label="Quick actions"></div>
     </header>
   );
 };

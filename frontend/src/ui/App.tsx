@@ -1,56 +1,24 @@
 import React, { useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import CategorizeCluster from './CategorizeCluster';
-// Robust lazy Plot component using factory + explicit dist bundle to avoid evaluation issues.
-// Provide a typed alias for the resolved Plot component to appease TS when spreading props.
+import { ToastContainer, useToast } from './ToastContext';
+import { UnifiedFinancialPanel } from './UnifiedFinancialPanel';
+import { SkeletonLoader } from './SkeletonLoader';
+// Lazy-load Plotly to reduce initial bundle size
 type PlotComponent = React.ComponentType<any>;
-const Plot: React.LazyExoticComponent<PlotComponent> = React.lazy(async () => {
-	// Load the small factory module, then ensure a Plotly object is available at runtime.
-	// We avoid importing Plotly as a module to keep it out of the main bundle; instead
-	// we load it from the official CDN at runtime when needed.
-	try {
-		const factoryMod = await import('react-plotly.js/factory');
-		const createPlotlyComponent = (factoryMod as any).default || (factoryMod as any);
-
-		// If Plotly is already present on window, use it. Otherwise inject the CDN script.
-		let plotly: any = (typeof window !== 'undefined') ? (window as any).Plotly : undefined;
-		if (!plotly) {
-			const version = '2.34.0';
-			const cdn = `https://cdn.plot.ly/plotly-${version}.min.js`;
-			await new Promise<void>((resolve, reject) => {
-				// guard against double-injection
-				if ((window as any).Plotly) return resolve();
-				const existing = document.querySelector(`script[src="${cdn}"]`);
-				if (existing) {
-					existing.addEventListener('load', () => resolve());
-					existing.addEventListener('error', () => reject(new Error('Failed to load Plotly from CDN')));
-					return;
-				}
-				const s = document.createElement('script');
-				s.src = cdn;
-				s.async = true;
-				s.onload = () => resolve();
-				s.onerror = () => reject(new Error('Failed to load Plotly from CDN'));
-				document.head.appendChild(s);
-			});
-			plotly = (window as any).Plotly;
-		}
-
-		if (!plotly) throw new Error('Plotly failed to initialize');
-		return { default: createPlotlyComponent(plotly) };
-	} catch (err) {
-		try { if (process.env.NODE_ENV !== 'production') console.error('Failed to load Plotly components', err); } catch (_) {}
-		throw err;
-	}
-});
+const Plot: React.LazyExoticComponent<PlotComponent> = React.lazy(() => import('react-plotly.js'));
 import axios from 'axios';
+import { apiUrl } from '../config';
 import { useDebouncedValue, useWindowedRows, usePolling } from './hooks';
 import { DragonBallHeader } from './DragonBallHeader';
 import { DatePicker } from './DatePicker';
 import { DragonOrbIcon } from './DragonOrbIcon';
 import PortalPopover from './PortalPopover';
 import { buildConsistencyReport, ConsistencyReport } from './consistency';
-// Phase 3: dynamic framer-motion & sampleData lazy loading (removed static imports)
-
+function sanitizeFilename(name?: string | null) {
+	if (!name) return 'transactions';
+	const base = String(name).split('/').pop()!.split('\\\\').pop()!;
+	return base.replace(/[^\w\-\. ]/g, '_').slice(0, 100) || 'transactions';
+}
 type Txn = {
 	date?: string;
 	post_date?: string;
@@ -80,30 +48,61 @@ type ParseResponse = {
 	unparsed_sample: string[];
 	raw_line_count: number;
 	balance_mismatches?: any[];
+	total_transactions?: number;
+	truncated?: boolean;
+	max_transactions?: number;
 };
 
 // Extended type when multiple PDFs are combined client-side
 type CombinedParseResult = ParseResponse & { sources: ParseResponse[] };
 
-// ---------------- Utility Helpers (module scope; stable across renders) ---------------- //
+// Module helpers
 interface AmountStats { total: number; avg: number; median: number; min: number; max: number; charges: number; credits: number; largestInflow: number; largestOutflow: number; }
+
+const TRANSFER_RX = /(\bxfer\b|internal transfer|funds? transfer|account transfer|transfer to (credit|checking|savings|card)|transfer from (credit|checking|savings|card)|to credit card payment|payment to credit card|move to savings|auto ?transfer|online transfer|between accounts|card payment|credit card payment)/i;
+const CARD_PAYMENT_RX = /(credit card|card payment|payment to card|payment to credit card|visa|mastercard|amex|discover|payment received)/i;
+
+const isCreditCardAccount = (t: Txn) => (t.account_type || '').toLowerCase() === 'credit_card';
+const isTransferLike = (t: Txn) => {
+	const cat = (t.category || '').toLowerCase();
+	if (cat === 'account transfer') return true;
+	if (cat === 'savings' || cat === 'income') return false;
+	return TRANSFER_RX.test(t.description || '');
+};
 
 const deriveAmountStats = (txs: Txn[]): AmountStats | null => {
 	const amounts = txs.map(t => t.amount).filter((a): a is number => typeof a === 'number');
-	if(!amounts.length) return null;
-	const total = amounts.reduce((s,a)=> s + a, 0);
-	const avg = total / amounts.length;
-	const sorted=[...amounts].sort((a,b)=>a-b);
-	const mid=Math.floor(sorted.length/2);
-	const median = sorted.length % 2 ? sorted[mid] : (sorted[mid-1]+sorted[mid])/2;
-	let charges = 0, credits = 0, largestInflow = -Infinity, largestOutflow = Infinity;
-	for(const a of amounts){ if(a<0) charges += a; else if(a>0) credits += a; if(a>largestInflow) largestInflow=a; if(a<largestOutflow) largestOutflow=a; }
-	return { total, avg, median, min: Math.min(...amounts), max: Math.max(...amounts), charges, credits, largestInflow: largestInflow===-Infinity?0:largestInflow, largestOutflow: largestOutflow===Infinity?0:largestOutflow };
+	if (!amounts.length) return null;
+	const total = amounts.reduce((s, a) => s + a, 0);
+	const absAmounts = amounts.map(a => Math.abs(a));
+	const avg = absAmounts.reduce((s, a) => s + a, 0) / absAmounts.length;
+	const sorted = [...absAmounts].sort((a, b) => a - b);
+	const mid = Math.floor(sorted.length / 2);
+	const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+	let charges = 0,
+		credits = 0,
+		largestInflow = -Infinity,
+		largestOutflow = Infinity;
+	for (const a of amounts) {
+		if (a < 0) charges += a;
+		else if (a > 0) credits += a;
+		if (a > largestInflow) largestInflow = a;
+		if (a < largestOutflow) largestOutflow = a;
+	}
+	return {
+		total,
+		avg,
+		median,
+		min: Math.min(...amounts),
+		max: Math.max(...amounts),
+		charges,
+		credits,
+		largestInflow: largestInflow === -Infinity ? 0 : largestInflow,
+		largestOutflow: largestOutflow === Infinity ? 0 : largestOutflow,
+	};
 };
 
-// Helper to format numbers with commas and 2 decimals (still used in metrics)
 const formatNumber = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-// Integer formatting for charts (no decimal point)
 const formatInt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
 const DEBOUNCE_MS = 220;
@@ -112,28 +111,25 @@ const TXN_ROW_HEIGHT = 32;
 // Unified height for standard charts (keeps four-chart row visually consistent)
 const CHART_HEIGHT = 180;
 
-// ---- Date helpers (module-scope) ----
-// Normalize a date-like string to a local midnight timestamp (ms) for consistent comparisons
-const _ymdLocalMs = (y:number,m:number,d:number) => new Date(y, m-1, d, 0,0,0,0).getTime();
+const _ymdLocalMs = (y: number, m: number, d: number) => new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
 const parseDateToLocalMs = (raw?: string): number | null => {
-	if(!raw) return null;
-	// ISO: YYYY-MM-DD
+	if (!raw) return null;
 	const iso = raw.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
-	if(iso){ const y=Number(iso[1]); const m=Number(iso[2]); const d=Number(iso[3]); return _ymdLocalMs(y,m,d); }
-	// Common MDY or DMY with / or -
-	const m2 = raw.match(/^([0-9]{1,2})[\/-]([0-9]{1,2})[\/-]([0-9]{2,4})$/);
-	if(m2){
-		let a = parseInt(m2[1],10); let b = parseInt(m2[2],10); let yStr = m2[3];
-		const year = yStr.length===2 ? Number('20'+yStr) : Number(yStr);
-		if(a>12 && b<=12) return _ymdLocalMs(year, b, a); // DMY
-		if(b>12 && a<=12) return _ymdLocalMs(year, a, b); // MDY
-		return _ymdLocalMs(year, a, b); // default assume MDY
+	if (iso) return _ymdLocalMs(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+	const m2 = raw.match(/^([0-9]{1,2})[\/\-]([0-9]{1,2})[\/\-]([0-9]{2,4})$/);
+	if (m2) {
+		const a = parseInt(m2[1], 10);
+		const b = parseInt(m2[2], 10);
+		const yStr = m2[3];
+		const year = yStr.length === 2 ? Number('20' + yStr) : Number(yStr);
+		if (a > 12 && b <= 12) return _ymdLocalMs(year, b, a);
+		if (b > 12 && a <= 12) return _ymdLocalMs(year, a, b);
+		return _ymdLocalMs(year, a, b);
 	}
-	// Fallback to Date.parse then normalize to local Y/M/D
 	const t = Date.parse(raw);
-	if(isNaN(t)) return null;
+	if (isNaN(t)) return null;
 	const d = new Date(t);
-	return _ymdLocalMs(d.getFullYear(), d.getMonth()+1, d.getDate());
+	return _ymdLocalMs(d.getFullYear(), d.getMonth() + 1, d.getDate());
 };
 const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
@@ -203,21 +199,22 @@ export const App: React.FC = () => {
 	const [aiConsentGiven, setAIConsentGiven] = useState<boolean>(() => {
 		try { return localStorage.getItem('aiConsent') === '1'; } catch { return false; }
 	});
+	const [aiStatus, setAiStatus] = useState<{
+		enabled: boolean;
+		has_key: boolean;
+		client_ready: boolean;
+		model: string;
+		last_checked?: number | null;
+		last_ok?: boolean | null;
+		last_error?: string | null;
+	} | null>(null);
 	const [isUnparsedVisible, setIsUnparsedVisible] = useState(false);
-	// Toggle for the Parse Quality collapsible explanation
-	const [showQualityInfo, setShowQualityInfo] = useState(false);
-	// Key used to re-trigger ring SVG animation when clicked
-	const [ringAnimKey, setRingAnimKey] = useState<number>(0);
 	const [consistencyReport, setConsistencyReport] = useState<ConsistencyReport | null>(null);
-	// Ref used to anchor the parse-quality popover (mirrors consistency popover pattern)
-	const qualityRef = useRef<HTMLDivElement | null>(null);
 	// Cross-highlight + brush selection state for daily net chart
 	const [hoverDate, setHoverDate] = useState<string | null>(null);
 	// Preferences & auxiliary modals (light theme removed per request)
 	const [dateFormat, setDateFormat] = useState<'mdy'|'dmy'>('mdy');
-	const [faqOpen, setFaqOpen] = useState(false);
 	const [whatsNewOpen, setWhatsNewOpen] = useState(false);
-	const [tipsOpen, setTipsOpen] = useState(false); // parsing tips modal
 	// Missing UI/helper states
 	const [cachedMeta, setCachedMeta] = useState<{
 		fileName: string;
@@ -231,6 +228,7 @@ export const App: React.FC = () => {
 	const [tourOpen, setTourOpen] = useState(false);
 	// Cover: instructional accordion open states (default first open)
 	const [openStep, setOpenStep] = useState<{ upload: boolean; filter: boolean; analyze: boolean; export: boolean }>({ upload: true, filter: false, analyze: false, export: false });
+	const [showOnboarding, setShowOnboarding] = useState(false);
 	// Date range filter (inclusive). Empty string means no bound.
 	const [dateStart, setDateStart] = useState('');
 	const [dateEnd, setDateEnd] = useState('');
@@ -242,7 +240,6 @@ export const App: React.FC = () => {
 	const [showSettings, setShowSettings] = useState(false); // advanced settings panel
 	const [showInfoPanel, setShowInfoPanel] = useState(false); // info & utilities panel
 	const [areAllFeaturesShown, setAreAllFeaturesShown] = useState(false);
-	const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
 	// Phase 3 additions: recent files list & quality heuristic
 	const [recentFiles, setRecentFiles] = useState<{name:string; ts:number; txns:number}[]>([]);
 	useEffect(()=> { try { const raw = localStorage.getItem('recentFiles'); if(raw){ const arr = JSON.parse(raw); if(Array.isArray(arr)) setRecentFiles(arr); } } catch {/* ignore */} }, []);
@@ -257,12 +254,49 @@ export const App: React.FC = () => {
 	// Debounced text filter
 	const debouncedFilter = useDebouncedValue(rawFilter, DEBOUNCE_MS);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	
+	// Toast notifications
+	const { toasts, addToast, removeToast } = useToast();
 
 	// Backend health polling (with custom hook)
 	usePolling(async () => {
-		try { await axios.get('/api/health'); setBackendStatus('up'); }
+		try { await axios.get(apiUrl('/health')); setBackendStatus('up'); }
 		catch { setBackendStatus('down'); }
 	}, HEALTH_POLL_MS, true);
+
+	// AI/OpenAI connectivity status (for UI indicator)
+	useEffect(() => {
+		let cancelled = false;
+		const fetchStatus = async () => {
+			if (backendStatus === 'down') {
+				if (!cancelled) setAiStatus(null);
+				return;
+			}
+			try {
+				const { data } = await axios.get(apiUrl('/ai/status'), {
+					params: { validate: useAI && aiConsentGiven ? 1 : 0 },
+				});
+				if (!cancelled) setAiStatus(data);
+			} catch {
+				if (!cancelled) {
+					setAiStatus({
+						enabled: false,
+						has_key: false,
+						client_ready: false,
+						model: '',
+						last_ok: false,
+						last_error: 'unreachable',
+					});
+				}
+			}
+		};
+		fetchStatus();
+		const t = window.setInterval(fetchStatus, 60000);
+		return () => {
+			cancelled = true;
+			window.clearInterval(t);
+		};
+	}, [useAI, aiConsentGiven, backendStatus]);
 
 	// Idle prefetch of heavy chart library after initial paint (performance)
 	useEffect(() => {
@@ -285,7 +319,7 @@ export const App: React.FC = () => {
 		let done = false;
 		const kick = () => {
 			if(done) return; done = true;
-			fetch('/api/warmup', { method: 'GET' }).catch(()=>{/* ignore */});
+			fetch(apiUrl('/warmup'), { method: 'GET' }).catch(()=>{/* ignore */});
 		};
 		if((window as any).requestIdleCallback){
 			(window as any).requestIdleCallback(kick, { timeout: 3000 });
@@ -503,7 +537,7 @@ export const App: React.FC = () => {
 		setLoading(true); setError(null); setLiveStatus('Uploading…');
 		try {
 			const form = new FormData(); form.append('file', file);
-			const res = await axios.post<ParseResponse>('/api/parse?debug=1', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+			const res = await axios.post<ParseResponse>(apiUrl('/parse?debug=1'), form, { headers: { 'Content-Type': 'multipart/form-data' } });
 			setParseResult(res.data); setUndoState({}); setActiveAccountTypes(res.data.metrics.account_types || []);
 			setActiveSources([res.data.fileName]);
 			setCategoriesApplied(false); // reset categorization state for new file
@@ -533,7 +567,7 @@ export const App: React.FC = () => {
 			try {
 				setLiveStatus(`(${completed+1}/${files.length}) ${f.name}…`);
 				const form = new FormData(); form.append('file', f);
-				const res = await axios.post<ParseResponse>('/api/parse', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+				const res = await axios.post<ParseResponse>(apiUrl('/parse'), form, { headers: { 'Content-Type': 'multipart/form-data' } });
 				results.push(res.data);
 				pushRecent(res.data.fileName, res.data.metrics.transaction_count);
 				} catch (e:any) {
@@ -673,7 +707,7 @@ export const App: React.FC = () => {
 			// Common MDY or DMY with / or - separators
 			const m2 = raw.match(/^([0-9]{1,2})[/-]([0-9]{1,2})[/-]([0-9]{2,4})$/);
 			if(m2){
-				let a = parseInt(m2[1],10); let b = parseInt(m2[2],10); let yStr = m2[3];
+				const a = parseInt(m2[1],10); const b = parseInt(m2[2],10); const yStr = m2[3];
 				const year = yStr.length===2 ? Number('20'+yStr) : Number(yStr);
 				// If clearly day-first
 				if(a>12 && b<=12){ return ymdLocalMs(year, b, a); }
@@ -786,19 +820,19 @@ export const App: React.FC = () => {
 			layout: {
 				height: CHART_HEIGHT,
 				title: { text: 'Filtered vs Overall', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 60, r: 6, t: 32, b: 22 },
+				margin: { l: 60, r: 6, t: 32, b: 24 },
 				paper_bgcolor: 'rgba(0,0,0,0)',
 				plot_bgcolor: 'rgba(0,0,0,0)',
 				font: { color: PLOT_COLORS.text, size: 11 },
-				xaxis: { gridcolor: PLOT_COLORS.grid, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickformat: ',.0f' },
-				yaxis: { gridcolor: PLOT_COLORS.grid, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line },
-				showlegend: false
-			}
-		};
-	}, [parseResult, filteredNet]);
+			xaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickformat: ',.0f' },
+			yaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line },
+			showlegend: false
+		}
+	};
+}, [parseResult, filteredNet]);
 
-	const dailyNetChart = useMemo(() => {
-		if (!filteredTxns.length) return null;
+const dailyNetChart = useMemo(() => {
+	if (!filteredTxns.length) return null;
 		const byDay = new Map<string, number>();
 		filteredTxns.forEach(t => { if (!t.date || typeof t.amount !== 'number') return; byDay.set(t.date, (byDay.get(t.date) || 0) + t.amount); });
 		const days = [...byDay.keys()].sort();
@@ -840,10 +874,10 @@ export const App: React.FC = () => {
 			layout: {
 				height: CHART_HEIGHT,
 				title: { text: 'Daily Net', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 60, r: 6, t: 32, b: 40 },
+				margin: { l: 44, r: 6, t: 32, b: 24 },
 				paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: PLOT_COLORS.text, size: 11 },
-				xaxis: { gridcolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickfont: { color: PLOT_COLORS.text, size: 10 } },
-				yaxis: { gridcolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true },
+				xaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickfont: { color: PLOT_COLORS.text, size: 10 } },
+				yaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true },
 				legend: { orientation: 'h', x: 0, y: 1.12, font: { color: PLOT_COLORS.text, size: 10 } },
 				shapes,
 				hoverlabel: { bgcolor: PLOT_COLORS.hoverBg, bordercolor: PLOT_COLORS.hoverBorder, font: { color: PLOT_COLORS.text, size: 10 }, align: 'left' },
@@ -872,7 +906,7 @@ export const App: React.FC = () => {
 		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.accent, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:4, t:34, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ tickformat:',.0f', gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
+				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
 
@@ -883,8 +917,8 @@ export const App: React.FC = () => {
 		for(const t of filteredTxns){
 			if(typeof t.amount !== 'number') continue;
 			const cat = (t.category || '').toLowerCase();
-			if(cat === 'account transfer') continue;
-			if(cat === 'income') { if(t.amount > 0) income += t.amount; continue; }
+			if(isTransferLike(t)) continue;
+			if(cat === 'income') { if(t.amount > 0 && !isCreditCardAccount(t)) income += t.amount; continue; }
 			if(cat === 'savings') { if(t.amount > 0) savings += t.amount; continue; }
 			// Treat only negative amounts (money leaving) as expense contributions
 			if(t.amount < 0) expenseOut += Math.abs(t.amount);
@@ -897,7 +931,7 @@ export const App: React.FC = () => {
 		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:4, t:34, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ tickformat:',.0f', gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
+				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
 
@@ -917,10 +951,10 @@ export const App: React.FC = () => {
 		} else {
 			// No direct credit card account present. Infer payments from checking/savings Account Transfers referencing credit card.
 			for(const t of filteredTxns){
-				if(!t.category || t.category.toLowerCase() !== 'account transfer') continue;
+				if(!isTransferLike(t)) continue;
 				if(typeof t.amount !== 'number') continue;
 				// Looking for negative outflows that mention credit card keywords
-				if(t.amount < 0 && /credit card|visa|mastercard|amex|discover/i.test(t.description || '')) {
+				if(t.amount < 0 && CARD_PAYMENT_RX.test(t.description || '')) {
 					payments += -t.amount; // treat as payment magnitude
 				}
 			}
@@ -934,7 +968,7 @@ export const App: React.FC = () => {
 		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data:[{ type:'bar', orientation:'h', x:[charges,payments], y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition:'inside', insidetextanchor:'middle', textfont:{ color:PLOT_COLORS.markerEdge, size:11 }, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:4, t:34, b:26 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ tickformat:',.0f', gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ gridcolor:PLOT_COLORS.grid, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
+				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
 		};
 	}, [filteredTxns]);
 
@@ -951,10 +985,10 @@ export const App: React.FC = () => {
 		for(const t of filteredTxns){
 			if(typeof t.amount !== 'number') continue;
 			const cat = (t.category||'').toLowerCase();
-			if(cat === 'account transfer') continue;
+			if(isTransferLike(t)) continue;
 			// Align with allocation logic: ignore credit card positives as income
 			if(cat === 'income' && t.amount > 0){
-				if((t.account_type||'').toLowerCase() !== 'credit_card') { totalIncome += t.amount; }
+				if(!isCreditCardAccount(t)) { totalIncome += t.amount; }
 				continue;
 			}
 			if(cat === 'savings' && t.amount > 0){
@@ -1064,7 +1098,20 @@ export const App: React.FC = () => {
 		if(categoryGradient.length) categoryGradient = [...categoryGradient].reverse();
 		if(multiSavings){
 			if(allocSpending>0){ source.push(incomeIdx); target.push(spendingIdx); value.push(allocSpending); linkColor.push(hexToRgba(CHART_COLORS.accent,0.7)); }
-			if(allocSavings>0){ savingsAcctKeys.forEach((k,i)=> { const v = savingsByAcct[k]; if(v>0){ const capped = Math.min(v, allocSavings); source.push(incomeIdx); target.push(firstSavingsIdx + i); value.push(capped); linkColor.push(hexToRgba(savingsGradient[i],0.65)); }}); }
+			if(allocSavings>0){
+				let remaining = allocSavings;
+				savingsAcctKeys.forEach((k,i)=> {
+					const v = savingsByAcct[k];
+					if(v>0 && remaining>0){
+						const capped = Math.min(v, remaining);
+						remaining -= capped;
+						source.push(incomeIdx);
+						target.push(firstSavingsIdx + i);
+						value.push(capped);
+						linkColor.push(hexToRgba(savingsGradient[i],0.65));
+					}
+				});
+			}
 		} else {
 			if(allocSavings>0 && savingsIdx!==null){ source.push(incomeIdx); target.push(savingsIdx); value.push(allocSavings); linkColor.push(hexToRgba(CHART_COLORS.savings,0.7)); }
 			if(allocSpending>0){ source.push(incomeIdx); target.push(spendingIdx); value.push(allocSpending); linkColor.push(hexToRgba(CHART_COLORS.accent,0.7)); }
@@ -1157,7 +1204,7 @@ export const App: React.FC = () => {
 		const csv = [headers.join(','), ...rows.map(r=>r.join(','))].join('\n');
 		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a'); a.href = url; a.download = `${parseResult?.fileName || 'transactions'}.csv`; a.click(); URL.revokeObjectURL(url);
+		const a = document.createElement('a'); a.href = url; a.download = `${sanitizeFilename(parseResult?.fileName)}.csv`; a.click(); URL.revokeObjectURL(url);
 		}, [filteredTxns, parseResult, formatDate, visibleCols.source, getAccountDisplay]);
 
 	// (Removed duplicate deriveAmountStats - module version used)
@@ -1186,7 +1233,7 @@ export const App: React.FC = () => {
 		const wb = XLSX.utils.book_new();
 		XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
 		XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
-		const fname = `${parseResult?.fileName || 'transactions'}.xlsx`;
+		const fname = `${sanitizeFilename(parseResult?.fileName)}.xlsx`;
 		XLSX.writeFile(wb, fname);
 	}, [filteredTxns, parseResult, filteredNet, formatDate, visibleCols.source, getAccountDisplay]);
 
@@ -1197,14 +1244,50 @@ export const App: React.FC = () => {
 		const table = ['| '+headers.join(' | ')+' |','| '+headers.map(()=> '---').join(' | ')+' |', ...lines].join('\n');
 		navigator.clipboard.writeText(table).then(()=> setLiveStatus('Copied markdown table.')); },[filteredTxns, getAccountDisplay, visibleCols.source]);
 
-	// Quick stats (memoized) reuse shared computation
+	// Quick stats (memoized) with sign-safe averages/medians
 	const amountStatsSummary = useMemo(() => {
-		if(!filteredTxns.length) return null;
-		const stats = deriveAmountStats(filteredTxns);
-		if(!stats) return null;
-		const { total, avg, median, min, max, credits, charges } = stats as any;
+		if (!filteredTxns.length) return null;
+		const amounts = filteredTxns
+			.map(t => t.amount)
+			.filter((a): a is number => typeof a === 'number');
+		if (!amounts.length) return null;
+		const total = amounts.reduce((s, a) => s + a, 0);
+		const absAmounts = amounts.map(a => Math.abs(a));
+		const avg = absAmounts.reduce((s, a) => s + a, 0) / absAmounts.length;
+		const sortedAbs = [...absAmounts].sort((a, b) => a - b);
+		const mid = Math.floor(sortedAbs.length / 2);
+		const median = sortedAbs.length % 2 ? sortedAbs[mid] : (sortedAbs[mid - 1] + sortedAbs[mid]) / 2;
+		const credits = amounts.filter(a => a > 0).reduce((s, a) => s + a, 0);
+		const charges = amounts.filter(a => a < 0).reduce((s, a) => s + a, 0);
+		const max = amounts.filter(a => a > 0).reduce((m, a) => Math.max(m, a), 0);
+		const min = amounts.filter(a => a < 0).reduce((m, a) => Math.min(m, a), 0);
 		return { total, avg, median, min, max, credits, charges };
 	}, [filteredTxns]);
+
+	const aiIndicator = useMemo(() => {
+		if (backendStatus === 'down') {
+			return { text: 'AI: Backend offline', cls: 'ai-status-offline' };
+		}
+		if (!aiStatus) {
+			return { text: 'AI: Checking…', cls: 'ai-status-pending' };
+		}
+		if (!aiStatus.enabled) {
+			return { text: 'AI: Disabled (server)', cls: 'ai-status-off' };
+		}
+		if (!useAI) {
+			return { text: 'AI: Off', cls: 'ai-status-off' };
+		}
+		if (aiStatus.last_ok === true) {
+			return { text: 'AI: Connected', cls: 'ai-status-ok' };
+		}
+		if (aiStatus.has_key === false) {
+			return { text: 'AI: API key missing', cls: 'ai-status-warn' };
+		}
+		if (aiStatus.last_ok === false) {
+			return { text: 'AI: Error', cls: 'ai-status-error' };
+		}
+		return { text: 'AI: Not validated', cls: 'ai-status-warn' };
+	}, [aiStatus, backendStatus, useAI]);
 
 	// (helpers moved above export functions)
 
@@ -1233,8 +1316,6 @@ export const App: React.FC = () => {
 	}, [parseResult]);
 
 	// ---------------- Richer Top Metrics Derivations ---------------- //
-	const totalNet = useMemo(() => filteredTxns.reduce((a, t) => a + (typeof t.amount==='number'? t.amount:0), 0), [filteredTxns]);
-	const overallNet = useMemo(() => parseResult?.transactions.reduce((a, t) => a + (typeof t.amount==='number'? t.amount:0), 0) || 0, [parseResult]);
 	const hasActiveFilters = !!(rawFilter || activeAccountTypes.length>0 || dateStart || dateEnd || activeSources.length>0);
 
 	const coverageStats = useMemo(() => {
@@ -1272,17 +1353,17 @@ export const App: React.FC = () => {
 		for(const t of filteredTxns){
 			if(typeof t.amount !== 'number') continue;
 			const cat = (t.category||'').toLowerCase();
-			if(cat === 'account transfer') continue; // ignore transfers entirely
+			if(isTransferLike(t)) continue; // ignore transfers entirely
 			if(cat === 'income' && t.amount > 0){
 				// treat credit card positive payments as not income
-				if((t.account_type||'').toLowerCase() !== 'credit_card') income += t.amount;
+				if(!isCreditCardAccount(t)) income += t.amount;
 				continue;
 			}
 			if(cat === 'savings' && t.amount > 0){ savings += t.amount; continue; }
 			if(t.amount < 0){ expenses += Math.abs(t.amount); }
 		}
 		// Unallocated = leftover income after savings & expenses (no negative)
-		let unallocated = Math.max(0, income - savings - expenses);
+		const unallocated = Math.max(0, income - savings - expenses);
 		const total = income + savings + expenses + unallocated;
 		const creditCardOnly = filteredTxns.length>0 && filteredTxns.every(t => (t.account_type||'').toLowerCase()==='credit_card');
 		let pIncome = 0, pSavings = 0, pExpenses = 0, pUnallocated = 0;
@@ -1350,21 +1431,6 @@ export const App: React.FC = () => {
 		return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey); };
 	}, [showConsistencyDetails]);
 
-	// Close quality popover on outside click or Escape
-	useEffect(()=> {
-		if(!showQualityInfo) return;
-		const onDocClick = (e: MouseEvent) => {
-			if(!qualityRef.current) return;
-			if(!qualityRef.current.contains(e.target as Node)) {
-				setShowQualityInfo(false);
-			}
-		};
-		const onKey = (e: KeyboardEvent) => { if(e.key === 'Escape') setShowQualityInfo(false); };
-		document.addEventListener('mousedown', onDocClick);
-		document.addEventListener('keydown', onKey);
-		return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey); };
-	}, [showQualityInfo]);
-
 	// Persist UI prefs (single unified writer)
 	useEffect(() => {
 		try {
@@ -1383,6 +1449,8 @@ export const App: React.FC = () => {
 
 	// Consolidated Filters dropdown state
 	const [showFilterPanel, setShowFilterPanel] = useState(true);
+	// Progressive disclosure: hide advanced charts until user categorizes or explicitly enables
+	const [showAdvancedCharts, setShowAdvancedCharts] = useState(true);
 
 	// Determine if Reset should be shown (hide when only date filters are at dataset defaults)
 	const shouldShowReset = useMemo(() => {
@@ -1446,12 +1514,12 @@ export const App: React.FC = () => {
 	       setCachedMeta(null);
 	       setRecentFiles([]); // clear recents in React state too
 	       setLiveStatus('All local data cleared.');
-		fetch('/api/clear-caches', { method: 'POST' }).then(async r => {
+		fetch(apiUrl('/clear-caches'), { method: 'POST' }).then(async r => {
 			if(r.ok){
 				try{ const js = await r.json(); setLiveStatus('All local data + backend caches cleared.'); }catch{/* ignore parse */}
 			}
 		}).catch(()=>{/* offline */});
-	       fetch('/api/telemetry', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ event:'ui_clear_all', meta:{ aiEnabled: useAI } }) }).catch(()=>{});
+	       fetch(apiUrl('/telemetry'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ event:'ui_clear_all', meta:{ aiEnabled: useAI } }) }).catch(()=>{});
 	       setShowConfirmClear(false);
 	}, [useAI]);
 
@@ -1519,7 +1587,7 @@ export const App: React.FC = () => {
 		let categories: string[] | null = null;
 		let metadata: any[] | null = null;
 		try {
-			const res = await axios.post('/api/categorize', { records, use_ai: useAI }); // backend respects use_ai override
+			const res = await axios.post(apiUrl('/categorize'), { records, use_ai: useAI }); // backend respects use_ai override
 			if(Array.isArray(res.data?.categories) && res.data.categories.length === records.length) {
 				categories = res.data.categories;
 				if(Array.isArray(res.data?.metadata)) metadata = res.data.metadata;
@@ -1607,6 +1675,12 @@ export const App: React.FC = () => {
 		setLiveStatus('Categories cleared.');
 		refineAttemptedRef.current = false;
 	}, [parseResult]);
+	// Auto-enable advanced charts once user categorizes
+	useEffect(() => {
+		if (categoriesApplied && !showAdvancedCharts) {
+			setShowAdvancedCharts(true);
+		}
+	}, [categoriesApplied, showAdvancedCharts]);
 
 	// Category options used in per-row dropdowns. Combine heuristic set + any existing categories found in data.
 	const categoryOptions = useMemo(() => {
@@ -1688,7 +1762,7 @@ export const App: React.FC = () => {
 				<div className="themed-modal" role="dialog" aria-modal="true" aria-labelledby="clr-title" aria-describedby="clr-desc">
 					<div className="themed-backdrop" onClick={()=> setShowConfirmClear(false)} />
 					<div className="themed-modal-content">
-						<h2 id="clr-title">Confirm full reset</h2>
+						<h2 id="clr-title">Confirm Full Reset</h2>
 						<p id="clr-desc">This will remove all locally stored statement data, UI preferences, and request the backend to clear its caches. This action cannot be undone.</p>
 						<div className="themed-actions">
 							<button onClick={()=> setShowConfirmClear(false)} className="btn-cancel">Cancel</button>
@@ -1710,112 +1784,123 @@ export const App: React.FC = () => {
 									<h2 className="cover-left-title">Upload & Explore</h2>
 								{/* capability & trust sections moved to right column */}
 									{/* Tagline now lives here (replacing prior privacy pill) */}
-									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank or credit card PDF to parse on our secured backend. PDFs are uploaded over HTTPS and parsed in-memory on the server; parsed results are returned to your browser and are not persisted by default.</p>
+									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank or credit card PDF to parse on our secured backend. PDFs are uploaded over HTTPS and parsed in-memory on the server; parsed results are returned to your browser and are not persisted by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are sent for categorization — the original PDF and any sensitive details (account numbers, balances) are never submitted to external AI services.</p>
 									<div className="cta-row">
 										<button ref={uploadBtnRef} className="primary-cta primary-cta--ultra" onClick={()=>fileInputRef.current?.click()} aria-describedby="cover-desc" onMouseMove={onUploadBtnMove} onMouseLeave={onUploadBtnLeave}>
 											<DragonOrbIcon size={22} className="orb-icon" />
 											<span className="kw">Upload PDF(s)</span>
 										</button>
-										<span className="upload-secure-note" aria-hidden>🔒 Encrypted upload to mybudgetnerd.com — HTTPS</span>
-										<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try sample</span></button>
+										<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try Sample</span></button>
 										<input ref={fileInputRef} type="file" aria-hidden="true" accept="application/pdf" multiple style={{display:'none'}} onChange={onFileInputChange} />
 									</div>
 									<div className="drop-hint" aria-hidden="true">Or <span className="kw">drop a PDF</span> here</div>
 									<div className="prefs-summary" aria-hidden="true">Prefs: {dateFormat.toUpperCase()} · {isHighContrast? 'High Contrast':'Normal Contrast'}</div>
 									<div className="supported-note" role="note" aria-label="Supported statement types">Supported: Checking · Savings · Credit card <span className="muted">(Other formats may partially parse)</span></div>
-									{/* Removed guidelines line per request; tips still accessible via separate control if needed */}
-									<div className="instruction-accordion" role="region" aria-label="How it works">
-										<div className="ia-item">
-											<button
-												className={"dropdown-btn neutral wide" + (openStep.upload ? " open" : "")}
-												aria-expanded={openStep.upload}
-												aria-controls="ia-upload"
-												onClick={() => setOpenStep(s => ({ ...s, upload: !s.upload }))}
-											>
-												<span className="step-index">1</span> Upload
-											</button>
-											{openStep.upload && (
-												<div id="ia-upload" className="ia-body">
-													<p>Drag and drop PDF(s) or click <em><span className="kw">Upload PDF(s)</span></em>. Files are uploaded to the backend over HTTPS and parsed in-memory on the server; nothing is persisted by default.</p>
-													<ul className="tips">
-														<li>Supports Checking, Savings, and Credit Card statements; others may partially parse.</li>
-														<li>Upload single or multiple files. Large files may parse slower.</li>
-														<li>Just exploring? Use <em><span className="kw">Try sample</span></em> to view the demo.</li>
-													</ul>
-												</div>
-											)}
-										</div>
-										<div className="ia-item">
-											<button
-												className={"dropdown-btn neutral wide" + (openStep.filter ? " open" : "")}
-												aria-expanded={openStep.filter}
-												aria-controls="ia-filter"
-												onClick={() => setOpenStep(s => ({ ...s, filter: !s.filter }))}
-											>
-												<span className="step-index">2</span> Filter
-											</button>
-											{openStep.filter && (
-												<div id="ia-filter" className="ia-body">
-													<p>Refine results using the <span className="kw">search box</span>, <span className="kw">date range</span>, <span className="kw">account types</span>, and <span className="kw">sources</span> (when multiple PDFs are loaded).</p>
-													<ul className="tips">
-														<li>Search supports <code>cat:&lt;name&gt;</code> (e.g., <code>cat:food</code>) and plain-text matches in descriptions.</li>
-														<li>Date pickers default to dataset bounds — use <em><span className="kw">Reset</span></em> to revert filters.</li>
-														<li>Shortcut: press <kbd>⌘/Ctrl</kbd> + <kbd>K</kbd> to focus the search box.</li>
-													</ul>
-												</div>
-											)}
-										</div>
-										<div className="ia-item">
-											<button
-												className={"dropdown-btn neutral wide" + (openStep.analyze ? " open" : "")}
-												aria-expanded={openStep.analyze}
-												aria-controls="ia-analyze"
-												onClick={() => setOpenStep(s => ({ ...s, analyze: !s.analyze }))}
-											>
-												<span className="step-index">3</span> Analyze
-											</button>
-											{openStep.analyze && (
-												<div id="ia-analyze" className="ia-body">
-													<p>Click <em><span className="kw">Categorize</span></em> to label transactions. Charts update with your filters: Daily Net, Account Mix, Income·Savings·Expense, Credit Charges vs Payments, and the Income Allocation Sankey.</p>
-													<ul className="tips">
-														<li>Enable <span className="kw">AI</span> (opt‑in) to refine categories on the backend. Transfers are excluded from analytics.</li>
-														<li><span className="kw">Hover</span> charts for unified tooltips; select a range on Daily Net to focus dates.</li>
-														<li>Toggle <span className="kw">Flow</span> to enable the Sankey; expand <span className="kw">Savings</span> to split by account.</li>
-														<li><strong>Inline review:</strong> Each row includes a category dropdown for quick reclassification; user overrides show in <span className="kw">theme yellow</span> and a mini-undo is available.</li>
-													</ul>
-												</div>
-											)}
-										</div>
-										<div className="ia-item">
-											<button
-												className={"dropdown-btn neutral wide" + (openStep.export ? " open" : "")}
-												aria-expanded={openStep.export}
-												aria-controls="ia-export"
-												onClick={() => setOpenStep(s => ({ ...s, export: !s.export }))}
-											>
-												<span className="step-index">4</span> Export
-											</button>
-											{openStep.export && (
-												<div id="ia-export" className="ia-body">
-													<p>Export the filtered table to <span className="kw">CSV</span> or <span className="kw">Excel</span>, or copy a <span className="kw">Markdown</span> snapshot. Sort columns and toggle fields before export.</p>
-													<ul className="tips">
-														<li><span className="kw">CSV</span> is ideal for quick imports; <span className="kw">Excel</span> includes a Summary sheet.</li>
-														<li><span className="kw">Markdown</span> is convenient for sharing—top 500 rows included.</li>
-													</ul>
-												</div>
-											)}
-										</div>
-									</div>
-									<ul className="shortcut-hints" aria-label="Keyboard shortcuts">
+											{/* Removed guidelines line per request; tips still accessible via separate control if needed */}
+											<div className="instruction-compact">
+												<button
+													className={"dropdown-btn neutral wide" + (showOnboarding ? " open" : "")}
+													aria-expanded={showOnboarding}
+													aria-controls="onboarding-steps"
+													onClick={() => setShowOnboarding(v => !v)}
+												>
+													{showOnboarding ? 'Hide Steps' : 'Show Steps'}
+												</button>
+												{showOnboarding && (
+													<div id="onboarding-steps" className="instruction-accordion" role="region" aria-label="How it works">
+														<div className="ia-item">
+															<button
+																className={"dropdown-btn neutral wide" + (openStep.upload ? " open" : "")}
+																aria-expanded={openStep.upload}
+																aria-controls="ia-upload"
+																onClick={() => setOpenStep(s => ({ ...s, upload: !s.upload }))}
+															>
+																<span className="step-index">1</span> Upload
+															</button>
+															{openStep.upload && (
+																<div id="ia-upload" className="ia-body">
+																	<p>Drag and drop PDF(s) or click <em><span className="kw">Upload PDF(s)</span></em>. Files are uploaded to the backend over HTTPS and parsed in-memory on the server; nothing is persisted by default.</p>
+																	<ul className="tips">
+																		<li>Supports Checking, Savings, and Credit Card statements; others may partially parse.</li>
+																		<li>Upload single or multiple files. Large files may parse slower.</li>
+																		<li>Just exploring? Use <em><span className="kw">Try Sample</span></em> to view the demo.</li>
+																	</ul>
+																</div>
+															)}
+														</div>
+														<div className="ia-item">
+															<button
+																className={"dropdown-btn neutral wide" + (openStep.filter ? " open" : "")}
+																aria-expanded={openStep.filter}
+																aria-controls="ia-filter"
+																onClick={() => setOpenStep(s => ({ ...s, filter: !s.filter }))}
+															>
+																<span className="step-index">2</span> Filter
+															</button>
+															{openStep.filter && (
+																<div id="ia-filter" className="ia-body">
+																	<p>Refine results using the <span className="kw">search box</span>, <span className="kw">date range</span>, <span className="kw">account types</span>, and <span className="kw">sources</span> (when multiple PDFs are loaded).</p>
+																	<ul className="tips">
+																		<li>Search supports <code>cat:&lt;name&gt;</code> (e.g., <code>cat:food</code>) and plain-text matches in descriptions.</li>
+																		<li>Date pickers default to dataset bounds — use <em><span className="kw">Reset</span></em> to revert filters.</li>
+																		<li>Shortcut: press <kbd>⌘/Ctrl</kbd> + <kbd>K</kbd> to focus the search box.</li>
+																	</ul>
+																</div>
+															)}
+														</div>
+														<div className="ia-item">
+															<button
+																className={"dropdown-btn neutral wide" + (openStep.analyze ? " open" : "")}
+																aria-expanded={openStep.analyze}
+																aria-controls="ia-analyze"
+																onClick={() => setOpenStep(s => ({ ...s, analyze: !s.analyze }))}
+															>
+																<span className="step-index">3</span> Analyze
+															</button>
+															{openStep.analyze && (
+																<div id="ia-analyze" className="ia-body">
+																	<p>Click <em><span className="kw">Categorize</span></em> to label transactions. Charts update with your filters: Daily Net, Account Mix, Income·Savings·Expense, Credit Charges vs Payments, and the Income Allocation Sankey.</p>
+																	<ul className="tips">
+																		<li>Enable <span className="kw">AI</span> (opt-in) to refine categories on the backend. Transfers are excluded from analytics.</li>
+																		<li><span className="kw">Hover</span> charts for unified tooltips; select a range on Daily Net to focus dates.</li>
+																		<li>Toggle <span className="kw">Flow</span> to enable the Sankey; expand <span className="kw">Savings</span> to split by account.</li>
+																		<li><strong>Inline review:</strong> Each row includes a category dropdown for quick reclassification; user overrides show in <span className="kw">theme yellow</span> and a mini-undo is available.</li>
+																	</ul>
+																</div>
+															)}
+														</div>
+														<div className="ia-item">
+															<button
+																className={"dropdown-btn neutral wide" + (openStep.export ? " open" : "")}
+																aria-expanded={openStep.export}
+																aria-controls="ia-export"
+																onClick={() => setOpenStep(s => ({ ...s, export: !s.export }))}
+															>
+																<span className="step-index">4</span> Export
+															</button>
+															{openStep.export && (
+																<div id="ia-export" className="ia-body">
+																	<p>Export the filtered table to <span className="kw">CSV</span> or <span className="kw">Excel</span>, or copy a <span className="kw">Markdown</span> snapshot. Sort columns and toggle fields before export.</p>
+																	<ul className="tips">
+																		<li><span className="kw">CSV</span> is ideal for quick imports; <span className="kw">Excel</span> includes a Summary sheet.</li>
+																		<li><span className="kw">Markdown</span> is convenient for sharing—top 500 rows included.</li>
+																	</ul>
+																</div>
+															)}
+														</div>
+													</div>
+												)}
+											</div>
+										<ul className="shortcut-hints" aria-label="Keyboard Shortcuts">
 										{/* Hotkeys moved into settings panel */}
 									</ul>
 										{/* Removed dedicated last session bubble */}
 									{recentFiles.length > 0 && (
-										<div className="recent-card" aria-label="Recent sessions">
+											<div className="recent-card" aria-label="Recent Sessions">
 											<div className="recent-card-head">
 												<span className="recent-title">Recent</span>
-												<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume last session">Resume</button>
-												<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear all data">
+												<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume Last Session">Resume</button>
+												<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear All Data">
 													<svg className="clear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
 														<path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 														<path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1845,29 +1930,36 @@ export const App: React.FC = () => {
 											aria-haspopup="true"
 											aria-controls="help-tools-panel"
 											onClick={()=> setShowInfoPanel(s=>{ const next=!s; if(next) setShowSettings(false); return next; })}
-											title="Help & tools"
+											title="Help & Tools"
 										>
 											{showInfoPanel ? 'Help & Tools ▴' : 'Help & Tools ▾'}
 										</button>
 									</div>
 									{showSettings && (
-										<div className="settings-panel" aria-label="Advanced settings">
+										<div className="settings-panel" aria-label="Advanced Settings">
 											<div className="setting-row">
-												<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal contrast':'High contrast'}</button>
+												<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal Contrast':'High Contrast'}</button>
 												<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
 											</div>
 											{/* Utilities moved to Info & Tools panel */}
 										</div>
 									)}
 									{showInfoPanel && (
-										<div id="help-tools-panel" className="settings-panel" aria-label="Help & tools">
+										<div id="help-tools-panel" className="settings-panel" aria-label="Help & Tools">
 											<div className="setting-row">
-												<button className="faq-btn" onClick={()=> setFaqOpen(o=>!o)} aria-expanded={faqOpen}>{faqOpen? 'Hide FAQ':'FAQ'}</button>
 												<button className="shortcuts-btn" onClick={()=> setShowShortcuts(s=>!s)} aria-expanded={showShortcuts}>{showShortcuts? 'Hide Shortcuts':'Shortcuts'}</button>
+												<button className="tour-btn" onClick={()=> setTourOpen(true)}>Tour</button>
 												{/* Clear all moved to Recent card */}
 											</div>
+											<div className="shortcuts-card" aria-label="Help Overview">
+												<ul className="shortcut-hints">
+													<li>Use filters to focus a slice, then compare with Filtered vs Overall.</li>
+													<li>Daily Net supports drag-select to zoom a date range.</li>
+													<li>Transfers are excluded from allocation and savings metrics.</li>
+												</ul>
+											</div>
 											{showShortcuts && (
-												<div className="shortcuts-card" aria-label="Keyboard shortcuts">
+												<div className="shortcuts-card" aria-label="Keyboard Shortcuts">
 													<ul className="shortcut-hints">
 														<li><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd> focus filter</li>
 														<li><kbd>↵</kbd> / <kbd>Space</kbd> activates buttons</li>
@@ -1878,23 +1970,22 @@ export const App: React.FC = () => {
 										</div>
 									)}
 										{areMoreActionsOpen && (
-										<div className="more-actions" aria-label="Additional actions">
+										<div className="more-actions" aria-label="Additional Actions">
 											<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal':'High Contrast'}</button>
 											<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
 											<button className="clear-all-btn" onClick={clearAllLocal}>Clear All Data</button>
-											<button className="faq-btn" onClick={()=> setFaqOpen(o=>!o)} aria-expanded={faqOpen}>{faqOpen? 'Hide FAQ':'FAQ'}</button>
 											{/* About toggle removed; section always visible */}
 										</div>
 									)}
 								</div>
 								<div className="cover-right">
-											<h2 className="benefits-heading">Benefits & Capabilities</h2>
+											<h2 className="benefits-heading">Key Features</h2>
 											<div className="value-grid merged" aria-label="Key capabilities">
-												<div className="val-item"><strong>Private & Ephemeral</strong><span>PDFs are uploaded over HTTPS and parsed in-memory on the backend; results are returned to the browser and not persisted by default.</span></div>
-												<div className="val-item"><strong>Fast & Flexible</strong><span>Hundreds of lines parsed instantly; supports checking, savings, and credit card PDFs.</span></div>
-												<div className="val-item"><strong>Reviewable Categories</strong><span>Automatic, transparent categorization—optionally refine with AI (backend, opt‑in). Each row includes an inline category control so you can reclassify instantly; user overrides are highlighted and a mini-undo is available.</span></div>
-												<div className="val-item"><strong>Insightful Visuals</strong><span>Trends, distributions, and comparisons update live as you filter.</span></div>
-												<div className="val-item"><strong>Easy Export</strong><span>Download filtered tables as CSV, Excel, or Markdown for your records.</span></div>
+												<div className="val-item"><strong>Server-Side Parsing</strong><span>PDFs uploaded over HTTPS and parsed in-memory on backend; results returned to browser and not persisted by default.</span></div>
+												<div className="val-item"><strong>Fast Processing</strong><span>Hundreds of transactions parsed quickly; supports checking, savings, and credit card statements.</span></div>
+												<div className="val-item"><strong>Rule-Based Categories</strong><span>Pattern-based categorization with optional AI refinement (opt-in). Inline editing available for all categories with visual override indicators.</span></div>
+												<div className="val-item"><strong>Visual Analytics</strong><span>Interactive charts showing spending trends, account distributions, and cash flow over time.</span></div>
+												<div className="val-item"><strong>Export Options</strong><span>Download filtered data as CSV, Excel, or Markdown format for further analysis.</span></div>
 											</div>
 											<div className="cover-sub-sections merged-panels">
 												<div className="use-cases" aria-label="Common use cases">
@@ -1908,13 +1999,13 @@ export const App: React.FC = () => {
 													</ul>
 												</div>
 												<div className="trust-badges" aria-label="Trust & guarantees">
-													<h2>Why Trust It</h2>
+													<h2>Data Handling</h2>
 													<ul className="trust-condensed" role="list">
-														<li><span className="badge-local">Server-side</span> processing—PDFs are uploaded over HTTPS and parsed in-memory on the backend</li>
-														<li>Ephemeral by default—parsed transactions are held only for the session and not persisted by default</li>
-														<li>AI refinement runs on the backend and is strictly opt-in; no external categorization calls are made</li>
-														<li>Open source—inspect, verify, or run the code yourself</li>
-														<li>One-click purge—clear all session data immediately</li>
+														<li>PDFs uploaded via HTTPS and parsed in-memory on backend server</li>
+														<li>Parsed data returned to browser; not persisted by default</li>
+														<li>AI refinement (when enabled) sends only transaction descriptions to OpenAI API—PDFs and sensitive data never transmitted</li>
+														<li>Open source—review code and implementation details on GitHub</li>
+														<li>Clear all cached data with one-click purge button</li>
 													</ul>
 												</div>
 											</div>
@@ -1949,7 +2040,7 @@ export const App: React.FC = () => {
 														<div><span className="lbl">Quality</span><strong>Excellent</strong></div>
 														<div><span className="lbl">Credit Card</span><strong>Active</strong></div>
 													</div>
-													<button className="primary-cta sp-try-btn" type="button" onClick={loadDemoSample} style={{ marginLeft: '1.2em', marginTop: '.2em', alignSelf: 'flex-start' }}>Try sample</button>
+													<button className="primary-cta sp-try-btn" type="button" onClick={loadDemoSample} style={{ marginLeft: '1.2em', marginTop: '.2em', alignSelf: 'flex-start' }}>Try Sample</button>
 												</div>
 												<div className="sp-foot">
 													Upload your PDF to replace this demo snapshot with live interactive charts.
@@ -1976,22 +2067,6 @@ export const App: React.FC = () => {
 											<div className="drag-overlay-inner">Drop to upload and parse on the secure backend</div>
 										</div>
 									)}
-									{faqOpen && (
-										<div className="faq condensed" aria-label="Frequently asked questions">
-											<details open>
-												<summary>Data privacy?</summary>
-												<p>Server-side processing—PDFs are uploaded over HTTPS and parsed in-memory on the backend; parsed transactions are ephemeral by default and not persisted. AI refinement runs on the backend and is strictly opt-in; no external categorization calls are made. Use the one-click purge to clear session data immediately.</p>
-											</details>
-											<details>
-												<summary>Best statement format?</summary>
-												<p>Checking / Savings & credit card PDFs with clear tabular rows.</p>
-											</details>
-											<details>
-												<summary>Payoff ratio?</summary>
-												<p>Payments & credits ÷ charges (same period).</p>
-											</details>
-										</div>
-									)}
 								</div>
 							</div>
 							<div className="cover-corner" aria-label="Repository link">
@@ -1999,8 +2074,8 @@ export const App: React.FC = () => {
 							</div>
 						</section>
 					)}
-					<a href="#charts-start" className="skip-link">Skip to charts</a>
-					<a href="#table-start" className="skip-link">Skip to table</a>
+					<a href="#charts-start" className="skip-link">Skip to Charts</a>
+					<a href="#table-start" className="skip-link">Skip to Table</a>
 
 					<section className={"upload-panel" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
 						{parseResult && (
@@ -2021,41 +2096,18 @@ export const App: React.FC = () => {
 						{loading && <div className="spinner" />}
 						{error && <div className="error">{error}</div>}
 					</section>
+					{loading && (
+						<section className="metrics skeleton" aria-hidden="true">
+							{Array.from({ length: 3 }).map((_, i) => (
+								<SkeletonLoader key={`metric-skeleton-${i}`} type="card" height={120} className="metric-skeleton" />
+							))}
+						</section>
+					)}
 					{parseResult && !loading && (
 							<section className="metrics">
 								<div className={`metric composite accounts-metric ${consistencySummary? ('status-'+consistencySummary.status):''}`}>
-									<span>Transactions · Accounts</span>
-									{/* First row: transactions text only (no badges) */}
-									<strong className="txns-line">
-										{filteredTxns.length} <span className="label">transactions</span>
-									</strong>
-									{/* Composition rail + chips */}
-									{Object.keys(accountTypeCounts).length>0 && (()=>{
-										const entries = Object.entries(accountTypeCounts) as Array<[string, number]>;
-										const total = entries.reduce((s,[,v])=> s+v, 0) || 1;
-										return (
-											<div className="acct-legend" aria-label="Account type composition">
-												<div className="mix-bar" role="img" aria-label="Account composition bar">
-													{entries.map(([k,v])=> {
-														const pct = Math.max(0, Math.min(100, (v/total)*100));
-														const cls = `seg ${k.toLowerCase()==='credit_card'?'credit-card':k.toLowerCase()}`;
-														return <span key={k} className={cls} style={{width: pct+"%"}} title={`${k}: ${v} (${Math.round(pct)}%)`} />;
-													})}
-												</div>
-												<div className="acct-mini-counts">
-													{entries.map(([k,v])=> {
-														const typeClass = (k||'').toLowerCase()==='credit_card' ? 'credit-card' : (k||'').toLowerCase();
-														const labelType = (k||'').replace('_',' ');
-														return (
-															<span key={k} className={`acct-chip ${typeClass}`} title={`${v} ${labelType}`}>
-																{labelType}: {v}
-															</span>
-														);
-													})}
-												</div>
-											</div>
-										);
-									})()}
+									<div className="metric-head">
+										<span>Transactions · Accounts</span>
 										{consistencySummary && (
 											<div className="consistency-badge-wrap possible-issues-cta" ref={consistencyRef}>
 												<button
@@ -2104,14 +2156,51 @@ export const App: React.FC = () => {
 																</PortalPopover>
 															</React.Suspense>
 															);
-														})()
+													})()
 												)}
 											</div>
+										)}
+									</div>
+									{/* First row: transactions text only (no badges) */}
+									<strong className="txns-line">
+										{filteredTxns.length} <span className="label">transactions</span>
+									</strong>
+									{qualityHeuristic && (
+										<div className="secondary">Parse quality: {qualityHeuristic.label} ({qualityHeuristic.percent}%)</div>
 									)}
+									{/* Composition rail + chips */}
+									{Object.keys(accountTypeCounts).length>0 && (()=>{
+										const entries = Object.entries(accountTypeCounts) as Array<[string, number]>;
+										const total = entries.reduce((s,[,v])=> s+v, 0) || 1;
+										return (
+											<div className="acct-legend" aria-label="Account type composition">
+												<div className="mix-bar" role="img" aria-label="Account composition bar">
+													{entries.map(([k,v])=> {
+														const pct = Math.max(0, Math.min(100, (v/total)*100));
+														const cls = `seg ${k.toLowerCase()==='credit_card'?'credit-card':k.toLowerCase()}`;
+														return <span key={k} className={cls} style={{width: pct+"%"}} title={`${k}: ${v} (${Math.round(pct)}%)`} />;
+													})}
+												</div>
+												<div className="acct-mini-counts">
+													{entries.map(([k,v])=> {
+														const typeClass = (k||'').toLowerCase()==='credit_card' ? 'credit-card' : (k||'').toLowerCase();
+														const labelType = (k||'').replace('_',' ');
+														return (
+															<span key={k} className={`acct-chip ${typeClass}`} title={`${v} ${labelType}`}>
+																{labelType}: {v}
+															</span>
+														);
+													})}
+												</div>
+											</div>
+										);
+									})()}
 								</div>
 				
-								<div className={`metric composite ${allocationStats && !allocationStats.disabled && allocationStats.overspend && !allocationStats.creditCardOnly ? 'status-warn' : ''}`}>
-									<span>Allocation</span>
+								<div className={`metric composite ${allocationStats && !allocationStats.disabled ? (allocationStats.overspend && !allocationStats.creditCardOnly ? 'status-warn' : 'status-good') : ''}`}>
+									<div className="metric-head">
+										<span>Allocation</span>
+									</div>
 									{allocationStats ? (
 										<>
 											<strong>
@@ -2122,7 +2211,7 @@ export const App: React.FC = () => {
 																<span aria-hidden="true">→</span> Click <b style={{color:'var(--accent)'}}>Categorize</b> below to enable insights
 																</span>
 													</>
-												) : allocationStats.creditCardOnly ? 'Card activity' : (allocationStats.pSavings*100).toFixed(1)+"% saved"}
+												) : allocationStats.creditCardOnly ? 'Card-only view' : (allocationStats.pSavings*100).toFixed(1)+"% saved"}
 												{!allocationStats.disabled && allocationStats.overspend && !allocationStats.creditCardOnly && <span className="badge-inline warn" title="Expenses exceed income in this window">Overspend</span>}
 											</strong>
 												{allocationStats.disabled ? (
@@ -2136,26 +2225,6 @@ export const App: React.FC = () => {
 													<div className="bar-row savings"><div className="name">Sav</div><div className="track"><div className="fill" style={{width:(allocationStats.pSavings*100)+'%'}}/></div><div className="pct">{(allocationStats.pSavings*100).toFixed(1)}%</div></div>
 													<div className="bar-row expense"><div className="name">Exp</div><div className="track"><div className="fill" style={{width:(allocationStats.pExpenses*100)+'%'}}/></div><div className="pct">{(allocationStats.pExpenses*100).toFixed(1)}%</div></div>
 													{allocationStats.pUnallocated>0.001 && <div className="bar-row unallocated"><div className="name">Unal</div><div className="track"><div className="fill" style={{width:(allocationStats.pUnallocated*100)+'%'}}/></div><div className="pct">{(allocationStats.pUnallocated*100).toFixed(1)}%</div></div>}
-													{/* Numeric flows inline to correlate with bars */}
-													<div className="substats" aria-label="Flow totals">
-														{!categoriesApplied && amountStatsSummary ? (
-															<>
-																<div className="row"><span className="lbl">Credits</span><span className="val">{fmtShort(amountStatsSummary.credits)}</span></div>
-																<div className="row"><span className="lbl">Debits</span><span className="val">{fmtShort(amountStatsSummary.charges)}</span></div>
-															</>
-														) : allocationStats.creditCardOnly && amountStatsSummary ? (
-															<>
-																<div className="row"><span className="lbl">Payments</span><span className="val">{fmtShort(amountStatsSummary.credits)}</span></div>
-																<div className="row"><span className="lbl">Charges</span><span className="val">{fmtShort(amountStatsSummary.charges)}</span></div>
-															</>
-														) : (
-															<>
-																<div className="row"><span className="lbl">Income</span><span className="val">{fmtShort(allocationStats.income)}</span></div>
-																<div className="row"><span className="lbl">Expense</span><span className="val">{fmtShort(-allocationStats.expenses)}</span></div>
-																{allocationStats.savings>0 && <div className="row"><span className="lbl">Savings</span><span className="val">{fmtShort(allocationStats.savings)}</span></div>}
-															</>
-														)}
-													</div>
 												</div>
 											)}
 										</>
@@ -2171,7 +2240,9 @@ export const App: React.FC = () => {
 									}
 									return (
 										<div className={`metric composite ${concStatus}`}>
-											<span>Concentration</span>
+											<div className="metric-head">
+												<span>Concentration</span>
+											</div>
 											{coverageStats ? (
 												<>
 													{!categoriesApplied ? (
@@ -2197,91 +2268,7 @@ export const App: React.FC = () => {
 										</div>
 									);
 								})()}
-								{qualityHeuristic && (
-									<div
-										className="metric quality-metric"
-										title={`Parse quality: ${qualityHeuristic.label} (${qualityHeuristic.percent}%)`}
-										role="group"
-										aria-label={`Parse quality ${qualityHeuristic.label} ${qualityHeuristic.percent} percent`}
-										aria-describedby="parse-quality-desc"
-										tabIndex={0}
-									>
-										<span>Parse Quality</span>
-										<strong>
-											<span className={`quality-badge q-${qualityHeuristic.label.toLowerCase()}`}>
-												<button
-													ref={qualityRef as any}
-													className={`q-ring-btn q-${qualityHeuristic.label.toLowerCase()} q-badge-clickable`}
-													type="button"
-													aria-haspopup="dialog"
-													aria-controls="parse-quality-popover"
-													aria-expanded={showQualityInfo}
-													aria-label={`Parse quality ${qualityHeuristic.percent} percent, ${qualityHeuristic.label}`}
-													title={showQualityInfo ? 'Hide parse quality details' : 'Show parse quality details'}
-													onClick={() => { setShowQualityInfo(s => !s); setRingAnimKey(k => k + 1); }}
-													onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowQualityInfo(s => !s); setRingAnimKey(k => k + 1); } }}
-												>
-													<span className="q-ring" aria-hidden="true">
-														<svg key={ringAnimKey} viewBox="0 0 48 48" className={`q-ring-svg ${ringAnimKey > 0 ? 'pulse' : ''}`} aria-hidden="true" focusable="false">
-															<defs>
-																<linearGradient id="qGrad" x1="0%" x2="100%">
-																	<stop offset="0%" stopColor="var(--accent)" stopOpacity="1" />
-																	<stop offset="100%" stopColor="var(--accent-hover)" stopOpacity="1" />
-																</linearGradient>
-															</defs>
-															<circle className="q-ring-bg" cx="24" cy="24" r="19" />
-															<circle className="q-ring-fg" cx="24" cy="24" r="19" strokeDasharray={`${qualityHeuristic.percent} 100`} />
-															<g className="q-info" transform="translate(24,24) rotate(90)" aria-hidden="true">
-																<circle className="q-info-indicator" r="12" />
-																<text className="q-info-text" x="0" y="0" textAnchor="middle" dominantBaseline="middle">i</text>
-															</g>
-														</svg>
-													</span>
-													<span className="q-values">
-														<span className="q-label">{qualityHeuristic.percent}%</span>
-														<span className="q-text">{qualityHeuristic.label}</span>
-													</span>
-												</button>
-											</span>
-										</strong>
-									{/* Visually-hidden description for screen readers providing more context */}
-									<p id="parse-quality-desc" className="sr-only">Parse quality is a heuristic based on transaction count, parsing coverage, and account type variety; higher percentages indicate cleaner parsing results.</p>
-									{/* Themed popover (PortalPopover) anchored to the quality badge for consistent styling & placement */}
-									{showQualityInfo && (
-										<React.Suspense>
-											<PortalPopover anchorRef={qualityRef as any} isOpen={true} className="consistency-popover quality-popover">
-												<div id="parse-quality-popover" className="cp-head">Parse quality</div>
-												<div className="cp-body" role="dialog" aria-modal="false" aria-labelledby="parse-quality-popover">
-													<div className="quality-explain">
-														<strong>How it's calculated:</strong> the percentage is a rounded score (0–100%) based on transaction count, a small penalty for unparsed lines, and a small boost when multiple account types are present.
-														<br />
-														<strong>What it means:</strong> 100% indicates near-complete parsing and good coverage; lower values mean some lines were not parsed or coverage is incomplete.
-														<br />
-														<em>If no unparsed lines are present the score is shown as 100%.</em>
-													</div>
-													<div className="quality-actions">
-														<button
-															className="link-btn"
-															type="button"
-															onClick={() => setIsUnparsedVisible(s => !s)}
-															disabled={!(parseResult && Array.isArray(parseResult.unparsed_sample) && parseResult.unparsed_sample.length > 0)}
-															aria-disabled={!(parseResult && Array.isArray(parseResult.unparsed_sample) && parseResult.unparsed_sample.length > 0)}
-														>
-															{isUnparsedVisible ? 'Hide' : 'View'} unparsed lines ({parseResult?.unparsed_sample?.length ?? 0})
-														</button>
-														<span className="hint-muted">
-															{(parseResult && Array.isArray(parseResult.unparsed_sample) && parseResult.unparsed_sample.length > 0)
-																? ' — Unparsed lines are not included in transaction totals.'
-																: ' — No unparsed lines detected.'}
-														</span>
-													</div>
-												</div>
-												<button className="cp-close" type="button" onClick={() => { setShowQualityInfo(false); try { (qualityRef as any).current?.focus?.(); } catch {} }} aria-label="Close">×</button>
-											</PortalPopover>
-										</React.Suspense>
-									)}
-									</div>
-								)}
+
 								{/* Payoff ratio metric removed per request */}
 							</section>
 					)}
@@ -2298,17 +2285,15 @@ export const App: React.FC = () => {
 										setLiveStatus('Filters reset to defaults.');
 									}}>Reset</button>
 								)}
-							</div>
-							{amountStatsSummary && !showFilterPanel && (
-								<div className="quick-stats inline-mini" aria-label="Quick statistics (collapsed)">
-									<div className="qstat" title="Average amount"><span>Avg</span><strong>{formatNumber(amountStatsSummary.avg)}</strong></div>
-									<div className="qstat" title="Median amount"><span>Med</span><strong>{formatNumber(amountStatsSummary.median)}</strong></div>
-									<div className="qstat" title="Largest inflow"><span>Max+</span><strong>{formatNumber(amountStatsSummary.max)}</strong></div>
-									<div className="qstat" title="Largest outflow"><span>Max-</span><strong>{formatNumber(amountStatsSummary.min)}</strong></div>
-									<div className="qstat" title="Filtered total"><span>Total</span><strong>{formatNumber(amountStatsSummary.total)}</strong></div>
+								<div
+									className={`ai-status-pill ${aiIndicator.cls}`}
+									title={aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined}
+									aria-live="polite"
+								>
+									{aiIndicator.text}
 								</div>
-							)}
-									{showFilterPanel && (
+							</div>
+							{showFilterPanel && (
 										<>
 											<div className="filters-panel" role="region" aria-label="Filter controls">
 												<div className="filter-primary-row grid2">
@@ -2338,60 +2323,44 @@ export const App: React.FC = () => {
 											{/* Advanced filters collapsible */}
 											{(() => {
 												const totalSources = (parseResult as any).sources ? (parseResult as any).sources.length : 0;
-												const typesSummary = activeAccountTypes.length === 0 ? 'All types' : `${activeAccountTypes.length} type${activeAccountTypes.length>1?'s':''}`;
-												const sourcesSummary = totalSources > 1 ? (activeSources.length === 0 ? 'All sources' : `${activeSources.length}/${totalSources} sources`) : '';
-												const visibleColsCount = Object.values(visibleCols).filter(Boolean).length;
-												const colsSummary = `${visibleColsCount} cols`;
 												return (
 													<div className="filters-advanced">
-														<div className="filters-advanced-head">
-															<button className="filters-advanced-toggle" type="button" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} aria-expanded={showAdvancedFilters}>
-																{showAdvancedFilters ? 'Hide advanced' : 'More filters'}
-															</button>
-															<div className="filters-summary" aria-live="polite">
-																<span>{typesSummary}</span>
-																{sourcesSummary && <span>· {sourcesSummary}</span>}
-																<span>· {colsSummary}</span>
-															</div>
-														</div>
-														{showAdvancedFilters && (
-															<div className="filters-advanced-body">
-																<div className="filters-secondary-row">
-																	<div className="type-chips" aria-label="Account type filters">
-																		{(parseResult.metrics.account_types || []).map(t => { const active = activeAccountTypes.includes(t); return <button key={t} className={active ? 'chip active' : 'chip'} onClick={() => setActiveAccountTypes(prev => active ? prev.filter(x => x !== t) : [...prev, t])}>{t}</button>; })}
+														<div className="filters-advanced-body">
+															<div className="filters-secondary-row">
+																<div className="type-chips" aria-label="Account type filters">
+																	{(parseResult.metrics.account_types || []).map(t => { const active = activeAccountTypes.includes(t); return <button key={t} className={active ? 'chip active' : 'chip'} onClick={() => setActiveAccountTypes(prev => active ? prev.filter(x => x !== t) : [...prev, t])}>{t}</button>; })}
+																</div>
+																{/* Source file toggles (multi-PDF mode) */}
+																{(parseResult as any).sources && (parseResult as any).sources.length > 1 && (
+																	<div className="source-chips" aria-label="Source file filters">
+																		{(parseResult as any).sources.map((s: any) => {
+																			const name = s.fileName;
+																			const active = activeSources.includes(name) || activeSources.length===0; // if none selected treat as all active
+																			return <button key={name} className={active ? 'chip active' : 'chip'} onClick={() => {
+																				setActiveSources(prev => {
+																					if(prev.includes(name)) { const next = prev.filter(x=> x!==name); return next; }
+																					return [...prev, name];
+																				});
+																			}} title="Toggle inclusion of this source file in views">{name}</button>;
+																		})}
 																	</div>
-																	{/* Source file toggles (multi-PDF mode) */}
-																	{(parseResult as any).sources && (parseResult as any).sources.length > 1 && (
-																		<div className="source-chips" aria-label="Source file filters">
-																			{(parseResult as any).sources.map((s: any) => {
-																				const name = s.fileName;
-																				const active = activeSources.includes(name) || activeSources.length===0; // if none selected treat as all active
-																				return <button key={name} className={active ? 'chip active' : 'chip'} onClick={() => {
-																					setActiveSources(prev => {
-																						if(prev.includes(name)) { const next = prev.filter(x=> x!==name); return next; }
-																						return [...prev, name];
-																					});
-																				}} title="Toggle inclusion of this source file in views">{name}</button>;
-																			})}
-																		</div>
-																	)}
-																	<div className="col-toggle-group compact" aria-label="Column visibility">
-																		{Object.entries(visibleCols).map(([key, val]) => (
-																			<button
-																				key={key}
-																				type="button"
-																				className={"col-toggle-btn" + (val ? ' active' : '')}
-																				aria-pressed={val}
-																				onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
-																				title={(val? 'Hide ':'Show ') + key + ' column'}
-																			>
-																				<span className="indicator" aria-hidden="true" />{key}
-																			</button>
-																		))}
-																	</div>
+																)}
+																<div className="col-toggle-group compact" aria-label="Column visibility">
+																	{Object.entries(visibleCols).map(([key, val]) => (
+																		<button
+																			key={key}
+																			type="button"
+																			className={"col-toggle-btn" + (val ? ' active' : '')}
+																			aria-pressed={val}
+																			onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
+																			title={(val? 'Hide ':'Show ') + key + ' column'}
+																		>
+																			<span className="indicator" aria-hidden="true" />{key}
+																		</button>
+																	))}
 																</div>
 															</div>
-														)}
+														</div>
 													</div>
 												);
 											})()}
@@ -2406,11 +2375,11 @@ export const App: React.FC = () => {
 								<div className="themed-modal-content ai-consent-modal" role="document">
 									<h2 id="aiConsentTitle">Enable AI Refinement?</h2>
 									<div id="aiConsentBody" className="ai-consent-body">
-										<p><strong>Private & Server-side.</strong> When enabled, AI refinement runs on the backend in-memory; no external AI APIs are called. Parsed transaction data is not persisted by default.</p>
+										<p><strong>Private & Server-side.</strong> When enabled, AI refinement runs on the backend. The backend may call an external AI provider to suggest categories, but <strong>only the extracted transaction description</strong> (for example, "STARBUCKS #1234") is sent — the original PDF is never submitted to any external API.</p>
 										<ul className="ai-consent-points">
-											<li><span className="kw-local">Backend only</span> refinement processed in-memory on the server.</li>
-											<li><span className="kw-private">Private & secure</span>—no external categorization calls.</li>
-											<li>Improves category suggestions—always review and confirm results.</li>
+											<li><span className="kw-local">Backend processing</span> — AI runs on the server, not in the browser.</li>
+											<li><span className="kw-private">Privacy</span> — <strong>PDFs, account numbers, balances, and personal data are never sent</strong> to external services.</li>
+											<li>Improves category suggestions — results are recommendations; always review and confirm before accepting.</li>
 										</ul>
 										<label className="remember-choice">
 											<input
@@ -2430,16 +2399,34 @@ export const App: React.FC = () => {
 								</div>
 							</div>
 						)}
-						{amountStatsSummary && showFilterPanel && (
-						<section className="quick-stats" aria-label="Quick statistics for current filtered rows">
-								<div className="qstat" title="Average amount across filtered rows"><span>Average</span><strong>{formatNumber(amountStatsSummary.avg)}</strong></div>
-								<div className="qstat" title="Median amount (50th percentile) across filtered rows"><span>Median</span><strong>{formatNumber(amountStatsSummary.median)}</strong></div>
-								<div className="qstat" title="Largest positive amount (inflow / credit)"><span>Largest Inflow</span><strong>{formatNumber(amountStatsSummary.max)}</strong></div>
-								<div className="qstat" title="Largest negative amount (outflow / charge)"><span>Largest Outflow</span><strong>{formatNumber(amountStatsSummary.min)}</strong></div>
-								<div className="qstat" title="Sum of all filtered amounts"><span>Filtered Total</span><strong>{formatNumber(amountStatsSummary.total)}</strong></div>
+					{parseResult && !loading && (
+						<UnifiedFinancialPanel
+							transactions={parseResult.transactions}
+							filteredTransactions={filteredTxns}
+							dateStart={dateStart}
+							dateEnd={dateEnd}
+							categoriesApplied={categoriesApplied}
+							amountStats={amountStatsSummary ? {
+								total: amountStatsSummary.total,
+								avg: amountStatsSummary.avg,
+								median: amountStatsSummary.median,
+								min: amountStatsSummary.min,
+								max: amountStatsSummary.max,
+								charges: amountStatsSummary.charges,
+								credits: amountStatsSummary.credits,
+								largestInflow: amountStatsSummary.max,
+								largestOutflow: amountStatsSummary.min,
+							} : undefined}
+						/>
+					)}
+					{loading && (
+						<section className="charts-row four-charts unified skeleton" aria-hidden="true">
+							{Array.from({ length: 4 }).map((_, i) => (
+								<SkeletonLoader key={`chart-skeleton-${i}`} type="chart" height={CHART_HEIGHT} className="chart-skeleton" />
+							))}
 						</section>
 					)}
-						{parseResult && (
+					{parseResult && !loading && (
 						<section className="charts-row four-charts unified">
 							<span id="charts-start" className="sr-only" />
 							<React.Suspense fallback={<div className="chart" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:180}}>Loading charts…</div>}>
@@ -2494,7 +2481,7 @@ export const App: React.FC = () => {
 										/>
 									</div>
 									)}
-									{accountMixChart && (
+									{accountMixChart && showAdvancedCharts && (
 									<div className="chart">
 										{showSankeyFlow && sankeyChart ? (
 											<span className="chart-info" tabIndex={0} aria-label="Flow view: Income allocated to Savings, Spending and any Unallocated remainder; Spending split into top negative outflow categories; percentages show share of source node.">i
@@ -2558,7 +2545,7 @@ export const App: React.FC = () => {
 										)}
 									</div>
 									)}
-									{creditChargesChart && (
+									{creditChargesChart && showAdvancedCharts && (
 									<div className="chart">
 										<span className="chart-info" tabIndex={0} aria-label="Credit Card Charges vs Payments: Direct statement charges/payments or inferred payments from transfers when card statement absent.">i
 											<span className="tooltip" role="tooltip">
@@ -2710,22 +2697,6 @@ export const App: React.FC = () => {
 							<div className="tour-backdrop" onClick={()=> setWhatsNewOpen(false)} />
 						</div>
 					)}
-					{tipsOpen && (
-						<div className="tour-modal" role="dialog" aria-modal="true" aria-labelledby="tips-title">
-							<div className="tour-content tips-modal">
-								<h2 id="tips-title">Parsing tips</h2>
-								<ul className="tips-list">
-									<li>Use native PDF statements (not scans) when possible.</li>
-									<li>One statement per PDF improves balance reconstruction.</li>
-									<li>Ensure totals & running balances are visible on pages.</li>
-									<li>Trim very large multi-year PDFs for faster parsing.</li>
-									<li>If parsing fails, retry after removing password protection.</li>
-								</ul>
-								<button onClick={()=> setTipsOpen(false)} className="close-tour">Close</button>
-							</div>
-							<div className="tour-backdrop" onClick={()=> setTipsOpen(false)} />
-						</div>
-					)}
 				</main>
 				<footer className="site-footer" role="contentinfo">
 					<div className="footer-inner">
@@ -2739,6 +2710,7 @@ export const App: React.FC = () => {
 						</div>
 					</div>
 				</footer>
+				<ToastContainer />
 			</div>
 		</React.Suspense>
 	);

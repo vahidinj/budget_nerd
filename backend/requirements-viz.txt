@@ -1,0 +1,7 @@
+# Optional visualization dependencies (NOT for minimal API deploy)
+# Install locally only if you actually use the helper functions in `visualization.py`.
+#   pip install -r backend/requirements-viz.txt
+# Streamlit removed (not imported anywhere) to keep dependency footprint smaller.
+
+plotly==5.8.0
+matplotlib==3.6.0

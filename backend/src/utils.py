@@ -1,8 +1,4 @@
-"""Small shared helpers used by multiple backend modules.
-
-This module intentionally keeps tiny, well-tested utilities to avoid
-duplicating logic across `api.py`, `pdf_parser.py`, and `visualization.py`.
-"""
+"""Small shared helpers used by backend modules."""
 
 from __future__ import annotations
 

@@ -1,12 +1,16 @@
+// Application entrypoint
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import './errorProbe'; // inject runtime error probe first
+import './errorProbe';
 import { App } from './ui/App';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { ToastProvider } from './ui/ToastContext';
 import './styles/theme.css';
 
 createRoot(document.getElementById('root')!).render(
 	<ErrorBoundary>
-		<App />
+		<ToastProvider>
+			<App />
+		</ToastProvider>
 	</ErrorBoundary>
 );

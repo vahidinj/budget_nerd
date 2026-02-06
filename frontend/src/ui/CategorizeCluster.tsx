@@ -12,14 +12,8 @@ interface CategorizeClusterProps {
   justCategorizedFlash?: boolean;
 }
 
-/**
- * Compact, accessible cluster for categorization controls (button + AI toggle + status).
- * Layout goals:
- *  - Clear primary action prominence (Categorize)
- *  - Persistent status line (no layout shift) with refinement badge slot
- *  - Distinct AI toggle labeling (stateful text + color)
- *  - Reduced cognitive load via subtle separators
- */
+// Categorization controls: primary button + AI toggle + live status.
+// Layout: clear action, persistent status line, distinct AI toggle, subtle separators.
 export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
   categoriesApplied,
   categorizeLoading,
@@ -51,7 +45,7 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
             disabled={categorizeLoading}
             aria-busy={categorizeLoading}
             aria-label={categorizeLoading ? (categoriesApplied ? 'Removing categories' : 'Categorizing transactions') : (categoriesApplied ? 'Remove all categories' : 'Categorize transactions')}
-            title={categoriesApplied ? 'Remove all categories' : 'Auto‑tag transactions'}
+            title={categoriesApplied ? 'Remove all categories' : 'Auto-tag all transactions'}
           >
             <span className="cat-btn-bg" aria-hidden="true" />
             <span className="cat-btn-glow" aria-hidden="true" />
@@ -84,9 +78,9 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
               <PortalPopover anchorRef={catHelpBtnRef} isOpen={showCatHelp} className="consistency-popover">
                 <div className="cp-head">Categorize <span className="micro">how it works</span></div>
                 <ul className="cp-list">
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Auto‑tags transactions using reviewable heuristics — review and modify as needed.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Click again to <span className="kw">remove all categories</span>.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg"><span className="kw">Transfers</span> are excluded from allocation math.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Auto-tags transactions using pattern rules. Review and refine as needed.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Click again to remove all categories.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Transfers are excluded from budget totals.</span></li>
                 </ul>
                 <button className="cp-close" type="button" onClick={()=> setShowCatHelp(false)} aria-label="Close categorize help">×</button>
               </PortalPopover>
@@ -101,7 +95,7 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
             onClick={onToggleAI}
             aria-pressed={useAI}
             aria-label={useAI ? 'Disable AI refinement' : 'Enable AI refinement'}
-            title={useAI ? 'Disable AI refinement' : 'Enable AI refinement for extra accuracy'}
+            title={useAI ? 'Disable AI refinement' : 'Enable AI refinement (only descriptions sent to external AI)'}
           >
             <span className="dot" aria-hidden="true" />
             <span className="ai-pill-label">AI {useAI ? 'On':'Off'}</span>
@@ -121,9 +115,10 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
               <PortalPopover anchorRef={aiHelpBtnRef} isOpen={showAIHelp} className="consistency-popover">
                 <div className="cp-head">AI refinement <span className="micro">optional</span></div>
                 <ul className="cp-list">
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg"><span className="kw">AI</span> refines categories for improved precision.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Runs on the backend (server-side) when enabled — AI refinement is opt-in and processed in-memory.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Toggle anytime; always review results.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">AI refines categories for better accuracy using pattern models.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">Runs server-side. Only transaction descriptions are sent to external AI providers.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">PDFs stay on your device. Never transmitted to third parties.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Review and approve all suggestions before applying.</span></li>
                 </ul>
                 <button className="cp-close" type="button" onClick={()=> setShowAIHelp(false)} aria-label="Close AI help">×</button>
               </PortalPopover>

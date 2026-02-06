@@ -68,7 +68,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, min, ma
     const handler = (e: KeyboardEvent) => {
       if(e.key === 'Escape'){ setOpen(false); return; }
       if(!value) return; // navigation relative to selected date
-      let base = new Date(value + 'T00:00:00');
+      const base = new Date(value + 'T00:00:00');
       if(e.key === 'ArrowLeft'){ base.setDate(base.getDate()-1); onChange(fmt(base)); e.preventDefault(); }
       else if(e.key === 'ArrowRight'){ base.setDate(base.getDate()+1); onChange(fmt(base)); e.preventDefault(); }
       else if(e.key === 'ArrowUp'){ base.setDate(base.getDate()-7); onChange(fmt(base)); e.preventDefault(); }
