@@ -105,7 +105,7 @@ export const UndoRedoControls: React.FC<UndoRedoControlsProps> = ({ canUndo, can
         className="undo-redo-btn undo-btn"
         onClick={onUndo}
         disabled={!canUndo}
-        title="Undo (Cmd+Z)"
+        title="Undo"
         aria-label="Undo"
       >
         ↶ Undo
@@ -114,7 +114,7 @@ export const UndoRedoControls: React.FC<UndoRedoControlsProps> = ({ canUndo, can
         className="undo-redo-btn redo-btn"
         onClick={onRedo}
         disabled={!canRedo}
-        title="Redo (Cmd+Shift+Z)"
+        title="Redo"
         aria-label="Redo"
       >
         ↷ Redo

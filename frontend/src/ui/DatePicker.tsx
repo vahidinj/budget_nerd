@@ -62,7 +62,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, min, ma
     return () => { window.removeEventListener('resize', compute); window.removeEventListener('scroll', compute, true); };
   }, [open]);
 
-  // Keyboard handling when open
   useEffect(() => {
     if(!open) return;
     const handler = (e: KeyboardEvent) => {

@@ -38,6 +38,65 @@ __all__ = [
 ]
 
 
+ACCOUNT_NUMBER_LABEL_RX = re.compile(
+    r"(?:Primary\s+)?Account number:\s*([\d-]+)", re.IGNORECASE
+)
+ACCOUNT_SUMMARY_NAME_RX = re.compile(
+    r"^(?P<name>.+?)\s+Account Summary$", re.IGNORECASE
+)
+SECTION_CREDIT_RX = re.compile(
+    r"\b(Deposits?|Credits?|Other Additions|Other Credits|Additions|Payments and Credits|Interest)\b",
+    re.IGNORECASE,
+)
+SECTION_DEBIT_RX = re.compile(
+    r"\b(Withdrawals?|Debits?|Deductions|Other Deductions|Other Debits|Checks?|Fees|Service Charges|Payments)\b",
+    re.IGNORECASE,
+)
+DATE_AMOUNT_DESC_HEADER_RX = re.compile(r"^Date\s+Amount\s+Description$", re.IGNORECASE)
+DATE_DESC_AMOUNT_BAL_HEADER_RX = re.compile(
+    r"^Date\s+Description\s+Amount(?:\s+Balance)?$", re.IGNORECASE
+)
+DATE_DESC_DEBIT_CREDIT_BAL_HEADER_RX = re.compile(
+    r"^Date\s+Description\s+(?:Debit|Withdrawal)s?\s+(?:Credit|Deposit)s?\s+Balance$",
+    re.IGNORECASE,
+)
+DATE_DESC_BAL_HEADER_RX = re.compile(r"^Date\s+Description\s+Balance$", re.IGNORECASE)
+DAILY_BALANCE_RX = re.compile(r"\bDaily Balance\b", re.IGNORECASE)
+CREDIT_DESC_HINTS = [
+    "DEPOSIT",
+    "CREDIT",
+    "INTEREST",
+    "REFUND",
+    "REVERSAL",
+    "PAYROLL",
+    "PAYMENT RECEIVED",
+]
+DEBIT_DESC_HINTS = [
+    "WITHDRAW",
+    "DEBIT",
+    "PURCHASE",
+    "PAYMENT",
+    "FEE",
+    "CHARGE",
+    "CHECK",
+    "BILLPAY",
+    "PMT",
+]
+TABLE_LAYOUTS = {
+    "date_amount_desc",
+    "date_desc_amount_balance",
+    "date_desc_debit_credit_balance",
+}
+SECTION_HEADER_HINT_RX = re.compile(
+    r"\bThere (?:were|was)\b|\btotaling\b", re.IGNORECASE
+)
+CC_PAYMENT_STRICT_RX = re.compile(
+    r"\b(PAYMENT RECEIVED|ONLINE PAYMENT|ELECTRONIC PAYMENT|ACH PAYMENT|BILL PAYMENT|AUTO ?PAY|AUTOPAY)\b",
+    re.IGNORECASE,
+)
+CC_PAYMENT_TOKEN_RX = re.compile(r"\bPMT\b", re.IGNORECASE)
+
+
 def classify_account(name: str | None) -> str | None:
     """Normalize account name to 'checking' or 'savings'."""
     if not name or not isinstance(name, str):
@@ -108,9 +167,11 @@ def parse_line_credit(
     desc = f"{rest}".strip()
     desc_up = desc.upper()
     # Determine sign: purchases/fees -> negative (outflow / increase liability), payments & credits -> positive
-    if any(k in desc_up for k in CC_PAYMENT_KEYWORDS) or any(
-        k in desc_up for k in CC_CREDIT_KEYWORDS
-    ):
+    payment_hit = bool(CC_PAYMENT_STRICT_RX.search(desc_up)) or bool(
+        CC_PAYMENT_TOKEN_RX.search(desc_up)
+    )
+    credit_hit = any(k in desc_up for k in CC_CREDIT_KEYWORDS)
+    if payment_hit or credit_hit:
         signed_amount = abs(amount)  # reduces liability
     else:
         signed_amount = -abs(amount)  # spending / charges
@@ -286,6 +347,55 @@ def should_skip_desc(desc: str) -> bool:
     return False
 
 
+def detect_layout(lines: List[str], credit_card_mode: bool) -> str:
+    if credit_card_mode:
+        return "credit_card"
+    for ln in lines[:300]:
+        if DATE_DESC_DEBIT_CREDIT_BAL_HEADER_RX.search(ln):
+            return "date_desc_debit_credit_balance"
+        if DATE_DESC_AMOUNT_BAL_HEADER_RX.search(ln):
+            return "date_desc_amount_balance"
+        if DATE_AMOUNT_DESC_HEADER_RX.search(ln):
+            return "date_amount_desc"
+    return "standard"
+
+
+def is_table_header(line: str) -> bool:
+    return bool(
+        DATE_DESC_DEBIT_CREDIT_BAL_HEADER_RX.search(line)
+        or DATE_DESC_AMOUNT_BAL_HEADER_RX.search(line)
+        or DATE_AMOUNT_DESC_HEADER_RX.search(line)
+        or DATE_DESC_BAL_HEADER_RX.search(line)
+    )
+
+
+def is_section_header(line: str) -> bool:
+    if DATE_PREFIX_RX.match(line):
+        return False
+    return bool(SECTION_HEADER_HINT_RX.search(line))
+
+
+def infer_signed_amount(amount: float, desc: str, section_sign: int | None) -> float:
+    if section_sign == 1:
+        return abs(amount)
+    if section_sign == -1:
+        return -abs(amount)
+    desc_up = desc.upper()
+    if re.search(r"\bINTEREST (PAYMENT|PAID)\b", desc_up):
+        return abs(amount)
+    if re.search(r"\bCREDIT CARD (PMT|PAYMENT)\b", desc_up):
+        return -abs(amount)
+    credit_hit = any(h in desc_up for h in CREDIT_DESC_HINTS)
+    debit_hit = any(h in desc_up for h in DEBIT_DESC_HINTS)
+    if credit_hit and debit_hit:
+        return -abs(amount)
+    if credit_hit:
+        return abs(amount)
+    if debit_hit:
+        return -abs(amount)
+    return amount
+
+
 def parse_line(
     line: str,
     default_year: int | None,
@@ -426,6 +536,154 @@ def parse_line(
     }
 
 
+def parse_line_date_amount_desc(
+    line: str,
+    default_year: int | None,
+    account_name: str | None,
+    account_number: str | None,
+    account_type: str | None = None,
+    date_order: str | None = None,
+    section_sign: int | None = None,
+):
+    tokens = line.split()
+    if len(tokens) < 3:
+        return None
+    if not DATE_PREFIX_RX.match(tokens[0]):
+        return None
+    if not AMOUNT_TOKEN_RX.match(tokens[1]):
+        return None
+    amount = normalize_number(tokens[1])
+    if amount is None:
+        return None
+    description = " ".join(tokens[2:]).strip()
+    if not description:
+        return None
+    signed_amount = infer_signed_amount(amount, description, section_sign)
+    debit = abs(signed_amount) if signed_amount < 0 else None
+    credit = signed_amount if signed_amount > 0 else None
+    return {
+        "date": parse_date(tokens[0], default_year, date_order),
+        "date_raw": tokens[0],
+        "description": description,
+        "amount": signed_amount,
+        "debit": debit,
+        "credit": credit,
+        "balance": None,
+        "account_name": account_name,
+        "account_number": account_number,
+        "account_type": account_type,
+        "line_type": "transaction",
+        "raw_line": line,
+    }
+
+
+def parse_line_date_desc_amount_balance(
+    line: str,
+    default_year: int | None,
+    account_name: str | None,
+    account_number: str | None,
+    account_type: str | None = None,
+    date_order: str | None = None,
+    section_sign: int | None = None,
+):
+    tokens = line.split()
+    if len(tokens) < 4:
+        return None
+    if not DATE_PREFIX_RX.match(tokens[0]):
+        return None
+    trailing: list[str] = []
+    while tokens and AMOUNT_TOKEN_RX.match(tokens[-1]) and len(trailing) < 3:
+        trailing.append(tokens.pop())
+    trailing.reverse()
+    if len(trailing) != 2:
+        return None
+    amount = normalize_number(trailing[0])
+    balance = normalize_number(trailing[1])
+    if amount is None or balance is None:
+        return None
+    description = " ".join(tokens[1:]).strip()
+    if not description:
+        return None
+    signed_amount = infer_signed_amount(amount, description, section_sign)
+    debit = abs(signed_amount) if signed_amount < 0 else None
+    credit = signed_amount if signed_amount > 0 else None
+    return {
+        "date": parse_date(tokens[0], default_year, date_order),
+        "date_raw": tokens[0],
+        "description": description,
+        "amount": signed_amount,
+        "debit": debit,
+        "credit": credit,
+        "balance": balance,
+        "account_name": account_name,
+        "account_number": account_number,
+        "account_type": account_type,
+        "line_type": "transaction",
+        "raw_line": line,
+    }
+
+
+def parse_line_date_desc_debit_credit_balance(
+    line: str,
+    default_year: int | None,
+    account_name: str | None,
+    account_number: str | None,
+    account_type: str | None = None,
+    date_order: str | None = None,
+    section_sign: int | None = None,
+):
+    tokens = line.split()
+    if len(tokens) < 4:
+        return None
+    if not DATE_PREFIX_RX.match(tokens[0]):
+        return None
+    trailing: list[str] = []
+    while tokens and AMOUNT_TOKEN_RX.match(tokens[-1]) and len(trailing) < 4:
+        trailing.append(tokens.pop())
+    trailing.reverse()
+    if len(trailing) < 2:
+        return None
+    description = " ".join(tokens[1:]).strip()
+    if not description:
+        return None
+    balance = normalize_number(trailing[-1])
+    if balance is None:
+        return None
+    debit = credit = None
+    signed_amount = None
+    if len(trailing) >= 3:
+        debit = normalize_number(trailing[-3])
+        credit = normalize_number(trailing[-2])
+        if debit is None and credit is None:
+            return None
+        debit = abs(debit) if debit is not None else None
+        credit = abs(credit) if credit is not None else None
+        signed_amount = (credit or 0) - (debit or 0)
+    else:
+        amount = normalize_number(trailing[0])
+        if amount is None:
+            return None
+        signed_amount = infer_signed_amount(amount, description, section_sign)
+        if signed_amount < 0:
+            debit = abs(signed_amount)
+        elif signed_amount > 0:
+            credit = signed_amount
+    return {
+        "date": parse_date(tokens[0], default_year, date_order),
+        "date_raw": tokens[0],
+        "description": description,
+        "amount": signed_amount,
+        "debit": debit,
+        "credit": credit,
+        "balance": balance,
+        "account_name": account_name,
+        "account_number": account_number,
+        "account_type": account_type,
+        "line_type": "transaction",
+        "raw_line": line,
+    }
+
+
 def parse_bank_statement(
     pdf_file,
 ) -> tuple[pd.DataFrame, list[str], List[Tuple[int, str]]]:
@@ -438,10 +696,22 @@ def parse_bank_statement(
     default_year = infer_year(line_texts)
     date_order = infer_date_order(line_texts)
     credit_card_mode = detect_credit_card(line_texts)
+    layout = detect_layout(line_texts, credit_card_mode)
+    if layout in TABLE_LAYOUTS:
+        word_lines = extract_raw_lines(pdf_file, mode="words")
+        if word_lines:
+            raw_lines = word_lines
+            line_texts = [lt for _, lt in raw_lines]
+            default_year = infer_year(line_texts)
+            date_order = infer_date_order(line_texts)
 
     rows: List[dict] = []
     unparsed: list[str] = []
     account_name = account_number = account_type = None
+    section_sign: int | None = None
+    last_parsed_kind: str | None = None
+    daily_balance_mode = False
+    current_layout = layout
     raw_index = 0
 
     for pg, line in raw_lines:
@@ -450,7 +720,57 @@ def parse_bank_statement(
             account_name = hdr.group("name").strip()
             account_number = hdr.group("number")
             account_type = classify_account(account_name)
+            daily_balance_mode = False
+        acct_label = ACCOUNT_NUMBER_LABEL_RX.search(line)
+        if acct_label:
+            acct_digits = re.sub(r"\D", "", acct_label.group(1))
+            account_number = acct_digits or acct_label.group(1)
+        acct_summary = ACCOUNT_SUMMARY_NAME_RX.match(line)
+        if acct_summary and not account_name:
+            account_name = acct_summary.group("name").strip()
+            account_type = classify_account(account_name)
+        if is_section_header(line):
+            credit_hit = SECTION_CREDIT_RX.search(line)
+            debit_hit = SECTION_DEBIT_RX.search(line)
+            if credit_hit and debit_hit:
+                section_sign = None
+            elif credit_hit:
+                section_sign = 1
+                daily_balance_mode = False
+            elif debit_hit:
+                section_sign = -1
+                daily_balance_mode = False
+        if DATE_DESC_DEBIT_CREDIT_BAL_HEADER_RX.search(line):
+            current_layout = "date_desc_debit_credit_balance"
+            daily_balance_mode = False
+            continue
+        if DATE_DESC_AMOUNT_BAL_HEADER_RX.search(line):
+            current_layout = "date_desc_amount_balance"
+            daily_balance_mode = False
+            continue
+        if DATE_AMOUNT_DESC_HEADER_RX.search(line):
+            current_layout = "date_amount_desc"
+            daily_balance_mode = False
+            continue
+        if "Average Daily Balance" in line:
+            continue
+        if DAILY_BALANCE_RX.search(line):
+            if not credit_card_mode:
+                if last_parsed_kind == "table" and "Daily Balance" in line:
+                    prefix = line.split("Daily Balance", 1)[0].strip()
+                    if prefix and rows:
+                        rows[-1]["description"] = (
+                            rows[-1]["description"] + " " + prefix
+                        ).strip()
+                        rows[-1]["raw_line"] = rows[-1]["raw_line"] + " " + prefix
+                daily_balance_mode = True
+                last_parsed_kind = None
+            continue
         if DATE_RANGE_RX.match(line):  # statement period headers -> skip
+            continue
+        if is_table_header(line):
+            continue
+        if daily_balance_mode:
             continue
         # Select parser (credit card style has distinct line grammar)
         rec = None
@@ -463,6 +783,42 @@ def parse_bank_statement(
                 account_type or "credit_card",
                 date_order,
             )
+            if rec:
+                last_parsed_kind = "credit"
+        if not rec:
+            rec = parse_line_date_amount_desc(
+                line,
+                default_year,
+                account_name,
+                account_number,
+                account_type,
+                date_order,
+                section_sign,
+            )
+            if rec and current_layout not in TABLE_LAYOUTS:
+                current_layout = "date_amount_desc"
+        if not rec and current_layout == "date_desc_amount_balance":
+            rec = parse_line_date_desc_amount_balance(
+                line,
+                default_year,
+                account_name,
+                account_number,
+                account_type,
+                date_order,
+                section_sign,
+            )
+        if not rec and current_layout == "date_desc_debit_credit_balance":
+            rec = parse_line_date_desc_debit_credit_balance(
+                line,
+                default_year,
+                account_name,
+                account_number,
+                account_type,
+                date_order,
+                section_sign,
+            )
+        if rec and current_layout in TABLE_LAYOUTS:
+            last_parsed_kind = "table"
         if not rec:  # fallback to standard bank line parser
             rec = parse_line(
                 line,
@@ -472,12 +828,30 @@ def parse_bank_statement(
                 account_type,
                 date_order,
             )
+            if rec:
+                last_parsed_kind = "standard"
         if rec:
             rec["page"] = pg
             rec["raw_line_index"] = raw_index
             raw_index += 1
             rows.append(rec)
         else:
+            if last_parsed_kind == "table" and not daily_balance_mode:
+                if (
+                    not DATE_PREFIX_RX.match(line)
+                    and not DATE_RANGE_RX.match(line)
+                    and not is_table_header(line)
+                    and not SECTION_CREDIT_RX.search(line)
+                    and not SECTION_DEBIT_RX.search(line)
+                    and not ACCOUNT_HEADER_INLINE_RX.search(line)
+                    and not DAILY_BALANCE_RX.search(line)
+                ):
+                    if rows:
+                        rows[-1]["description"] = (
+                            rows[-1]["description"] + " " + line
+                        ).strip()
+                        rows[-1]["raw_line"] = rows[-1]["raw_line"] + " " + line
+                    continue
             if DATE_PREFIX_RX.match(line):  # looked like a txn start but failed parse
                 unparsed.append(f"[p{pg}] {line}")
     df = pd.DataFrame(rows)

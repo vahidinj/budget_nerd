@@ -60,6 +60,8 @@ def normalize_number(raw: str | None) -> float | None:
         neg = True
         token_nosym = token_nosym[1:]
     core = token_nosym
+    if core.startswith(".") and len(core) > 1:
+        core = "0" + core
     if not __import__("re").fullmatch(r"\d+(?:\.\d+)?", core):
         return None
     if "." not in core and len(core) > 7:

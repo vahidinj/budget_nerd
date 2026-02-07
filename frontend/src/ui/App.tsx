@@ -2,7 +2,6 @@ import React, { useCallback, useState, useMemo, useEffect, useRef } from 'react'
 import CategorizeCluster from './CategorizeCluster';
 import { ToastContainer, useToast } from './ToastContext';
 import { UnifiedFinancialPanel } from './UnifiedFinancialPanel';
-import { SkeletonLoader } from './SkeletonLoader';
 // Lazy-load Plotly to reduce initial bundle size
 type PlotComponent = React.ComponentType<any>;
 const Plot: React.LazyExoticComponent<PlotComponent> = React.lazy(() => import('react-plotly.js'));
@@ -176,7 +175,6 @@ export const App: React.FC = () => {
 	const [loading, setLoading] = useState(false);
 	const [liveStatus, setLiveStatus] = useState('');
 	const [isHighContrast, setIsHighContrast] = useState(false);
-	const [showShortcuts, setShowShortcuts] = useState(false);
 	const [isDropActive, setIsDropActive] = useState(false);
 	const filterInputRef = useRef<HTMLInputElement | null>(null);
 	const [visibleCols, setVisibleCols] = useState({ date: true, description: true, category: false, amount: true, balance: true, type: true, source: false });
@@ -679,17 +677,6 @@ export const App: React.FC = () => {
 	// Debounced filter application (single effect)
 	useEffect(() => { setFilter(debouncedFilter); }, [debouncedFilter]);
 
-	// Keyboard shortcut for focusing filter (Meta/Ctrl + K) with flash animation
-	useEffect(() => {
-		const triggerFlash = () => {
-			const el = filterInputRef.current; if(!el) return; el.classList.remove('filter-focus-anim'); void el.offsetWidth; el.classList.add('filter-focus-anim');
-		};
-		const handler = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); filterInputRef.current?.focus(); triggerFlash(); }
-		};
-		window.addEventListener('keydown', handler);
-		return () => window.removeEventListener('keydown', handler);
-	}, []);
 
 	// Compute filtered rows and sum in one pass
 	const { filteredTxns, filteredNet } = useMemo(() => {
@@ -1762,7 +1749,7 @@ const dailyNetChart = useMemo(() => {
 				<div className="themed-modal" role="dialog" aria-modal="true" aria-labelledby="clr-title" aria-describedby="clr-desc">
 					<div className="themed-backdrop" onClick={()=> setShowConfirmClear(false)} />
 					<div className="themed-modal-content">
-						<h2 id="clr-title">Confirm Full Reset</h2>
+						<h2 id="clr-title">Confirm full reset</h2>
 						<p id="clr-desc">This will remove all locally stored statement data, UI preferences, and request the backend to clear its caches. This action cannot be undone.</p>
 						<div className="themed-actions">
 							<button onClick={()=> setShowConfirmClear(false)} className="btn-cancel">Cancel</button>
@@ -1777,25 +1764,25 @@ const dailyNetChart = useMemo(() => {
 					{/* Cover section */}
 					{!parseResult && !loading && (
 						<section className={"cover" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} aria-labelledby="cover-title" aria-describedby="cover-desc">
-							<h1 id="cover-title" className="cover-global-title">Statement Insight Dashboard</h1>
+							<h1 id="cover-title" className="cover-global-title">Turn Your Bank Statement Into Clear Insights</h1>
 							{/* Tagline moved lower beside upload for tighter onboarding focus */}
 							<div className="cover-grid divided">
 								<div className="cover-left">
-									<h2 className="cover-left-title">Upload & Explore</h2>
+									<h2 className="cover-left-title">Upload Your Statement</h2>
 								{/* capability & trust sections moved to right column */}
 									{/* Tagline now lives here (replacing prior privacy pill) */}
-									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank or credit card PDF to parse on our secured backend. PDFs are uploaded over HTTPS and parsed in-memory on the server; parsed results are returned to your browser and are not persisted by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are sent for categorization — the original PDF and any sensitive details (account numbers, balances) are never submitted to external AI services.</p>
+									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank statement or credit card statement PDF to get a clear breakdown of cash flow, categories, savings, and card activity. Files are uploaded over HTTPS and parsed in-memory; results are returned to your browser and not persisted by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are used — PDFs and sensitive details never leave the server.</p>
 									<div className="cta-row">
 										<button ref={uploadBtnRef} className="primary-cta primary-cta--ultra" onClick={()=>fileInputRef.current?.click()} aria-describedby="cover-desc" onMouseMove={onUploadBtnMove} onMouseLeave={onUploadBtnLeave}>
 											<DragonOrbIcon size={22} className="orb-icon" />
-											<span className="kw">Upload PDF(s)</span>
+											<span className="kw">Upload Bank Statement PDF</span>
 										</button>
 										<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try Sample</span></button>
 										<input ref={fileInputRef} type="file" aria-hidden="true" accept="application/pdf" multiple style={{display:'none'}} onChange={onFileInputChange} />
 									</div>
-									<div className="drop-hint" aria-hidden="true">Or <span className="kw">drop a PDF</span> here</div>
-									<div className="prefs-summary" aria-hidden="true">Prefs: {dateFormat.toUpperCase()} · {isHighContrast? 'High Contrast':'Normal Contrast'}</div>
-									<div className="supported-note" role="note" aria-label="Supported statement types">Supported: Checking · Savings · Credit card <span className="muted">(Other formats may partially parse)</span></div>
+									<div className="cta-note" aria-hidden="true">See cash flow, categories, and card activity in seconds.</div>
+									<div className="drop-hint" aria-hidden="true">OR <span className="kw">DROP A BANK STATEMENT PDF</span> HERE</div>
+									<div className="supported-note" role="note" aria-label="Supported statement types">Supports: Checking · Savings · Credit Cards <span className="muted">(Other formats may partially parse)</span></div>
 											{/* Removed guidelines line per request; tips still accessible via separate control if needed */}
 											<div className="instruction-compact">
 												<button
@@ -1843,7 +1830,7 @@ const dailyNetChart = useMemo(() => {
 																	<ul className="tips">
 																		<li>Search supports <code>cat:&lt;name&gt;</code> (e.g., <code>cat:food</code>) and plain-text matches in descriptions.</li>
 																		<li>Date pickers default to dataset bounds — use <em><span className="kw">Reset</span></em> to revert filters.</li>
-																		<li>Shortcut: press <kbd>⌘/Ctrl</kbd> + <kbd>K</kbd> to focus the search box.</li>
+																		<li>Tap the search box to focus, then type to filter.</li>
 																	</ul>
 																</div>
 															)}
@@ -1891,16 +1878,14 @@ const dailyNetChart = useMemo(() => {
 													</div>
 												)}
 											</div>
-										<ul className="shortcut-hints" aria-label="Keyboard Shortcuts">
-										{/* Hotkeys moved into settings panel */}
-									</ul>
+										
 										{/* Removed dedicated last session bubble */}
 									{recentFiles.length > 0 && (
-											<div className="recent-card" aria-label="Recent Sessions">
+										<div className="recent-card" aria-label="Recent sessions">
 											<div className="recent-card-head">
 												<span className="recent-title">Recent</span>
-												<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume Last Session">Resume</button>
-												<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear All Data">
+												<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume last session">Resume</button>
+												<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear all data">
 													<svg className="clear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
 														<path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 														<path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1930,47 +1915,38 @@ const dailyNetChart = useMemo(() => {
 											aria-haspopup="true"
 											aria-controls="help-tools-panel"
 											onClick={()=> setShowInfoPanel(s=>{ const next=!s; if(next) setShowSettings(false); return next; })}
-											title="Help & Tools"
+											title="Help & tools"
 										>
 											{showInfoPanel ? 'Help & Tools ▴' : 'Help & Tools ▾'}
 										</button>
 									</div>
 									{showSettings && (
-										<div className="settings-panel" aria-label="Advanced Settings">
+										<div className="settings-panel" aria-label="Advanced settings">
 											<div className="setting-row">
-												<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal Contrast':'High Contrast'}</button>
+												<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal contrast':'High contrast'}</button>
 												<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
 											</div>
 											{/* Utilities moved to Info & Tools panel */}
 										</div>
 									)}
 									{showInfoPanel && (
-										<div id="help-tools-panel" className="settings-panel" aria-label="Help & Tools">
+										<div id="help-tools-panel" className="settings-panel" aria-label="Help & tools">
 											<div className="setting-row">
-												<button className="shortcuts-btn" onClick={()=> setShowShortcuts(s=>!s)} aria-expanded={showShortcuts}>{showShortcuts? 'Hide Shortcuts':'Shortcuts'}</button>
 												<button className="tour-btn" onClick={()=> setTourOpen(true)}>Tour</button>
 												{/* Clear all moved to Recent card */}
 											</div>
-											<div className="shortcuts-card" aria-label="Help Overview">
-												<ul className="shortcut-hints">
+											<div className="help-card" aria-label="Help overview">
+												<ul className="help-hints">
 													<li>Use filters to focus a slice, then compare with Filtered vs Overall.</li>
 													<li>Daily Net supports drag-select to zoom a date range.</li>
 													<li>Transfers are excluded from allocation and savings metrics.</li>
 												</ul>
 											</div>
-											{showShortcuts && (
-												<div className="shortcuts-card" aria-label="Keyboard Shortcuts">
-													<ul className="shortcut-hints">
-														<li><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd> focus filter</li>
-														<li><kbd>↵</kbd> / <kbd>Space</kbd> activates buttons</li>
-														<li>Sort columns by clicking headers</li>
-													</ul>
-												</div>
-											)}
+										
 										</div>
 									)}
 										{areMoreActionsOpen && (
-										<div className="more-actions" aria-label="Additional Actions">
+										<div className="more-actions" aria-label="Additional actions">
 											<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal':'High Contrast'}</button>
 											<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
 											<button className="clear-all-btn" onClick={clearAllLocal}>Clear All Data</button>
@@ -2074,8 +2050,8 @@ const dailyNetChart = useMemo(() => {
 							</div>
 						</section>
 					)}
-					<a href="#charts-start" className="skip-link">Skip to Charts</a>
-					<a href="#table-start" className="skip-link">Skip to Table</a>
+					<a href="#charts-start" className="skip-link">Skip to charts</a>
+					<a href="#table-start" className="skip-link">Skip to table</a>
 
 					<section className={"upload-panel" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
 						{parseResult && (
@@ -2096,13 +2072,6 @@ const dailyNetChart = useMemo(() => {
 						{loading && <div className="spinner" />}
 						{error && <div className="error">{error}</div>}
 					</section>
-					{loading && (
-						<section className="metrics skeleton" aria-hidden="true">
-							{Array.from({ length: 3 }).map((_, i) => (
-								<SkeletonLoader key={`metric-skeleton-${i}`} type="card" height={120} className="metric-skeleton" />
-							))}
-						</section>
-					)}
 					{parseResult && !loading && (
 							<section className="metrics">
 								<div className={`metric composite accounts-metric ${consistencySummary? ('status-'+consistencySummary.status):''}`}>
@@ -2299,7 +2268,7 @@ const dailyNetChart = useMemo(() => {
 												<div className="filter-primary-row grid2">
 													<div className="primary-left">
 														<div className="search-composite" role="group" aria-label="Search by description and date range">
-															<input ref={filterInputRef} className="filter-text" placeholder="Search description (⌘/Ctrl+K)" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
+																<input ref={filterInputRef} className="filter-text" placeholder="Search description" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
 															<div className="date-range compact inside-search" aria-label="Date range">
 																<label><span className="lbl">Start Date</span><DatePicker value={dateStart} onChange={setDateStart} ariaLabel="Start date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
 																<label><span className="lbl">End Date</span><DatePicker value={dateEnd} onChange={setDateEnd} ariaLabel="End date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
@@ -2399,7 +2368,7 @@ const dailyNetChart = useMemo(() => {
 								</div>
 							</div>
 						)}
-					{parseResult && !loading && (
+					{parseResult && (
 						<UnifiedFinancialPanel
 							transactions={parseResult.transactions}
 							filteredTransactions={filteredTxns}
@@ -2419,14 +2388,7 @@ const dailyNetChart = useMemo(() => {
 							} : undefined}
 						/>
 					)}
-					{loading && (
-						<section className="charts-row four-charts unified skeleton" aria-hidden="true">
-							{Array.from({ length: 4 }).map((_, i) => (
-								<SkeletonLoader key={`chart-skeleton-${i}`} type="chart" height={CHART_HEIGHT} className="chart-skeleton" />
-							))}
-						</section>
-					)}
-					{parseResult && !loading && (
+					{parseResult && (
 						<section className="charts-row four-charts unified">
 							<span id="charts-start" className="sr-only" />
 							<React.Suspense fallback={<div className="chart" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:180}}>Loading charts…</div>}>

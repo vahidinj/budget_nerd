@@ -113,8 +113,8 @@ export const UnifiedFinancialPanel: React.FC<UnifiedPanelProps> = ({
         </div>
         <div className="panel-meta">
           <span className="panel-count">{stats.count} transactions</span>
-          {stats.transferLikeCount > 0 && <span className="panel-badge">Transfers Excluded</span>}
-          {stats.inferredCardPayments && <span className="panel-badge warn">Card Payments Inferred</span>}
+          {stats.transferLikeCount > 0 && <span className="panel-badge">Transfers excluded</span>}
+          {stats.inferredCardPayments && <span className="panel-badge warn">Card payments inferred</span>}
         </div>
       </div>
 
@@ -126,7 +126,7 @@ export const UnifiedFinancialPanel: React.FC<UnifiedPanelProps> = ({
             <span className="metric-chip positive">Inflow</span>
           </div>
           <div className="metric-value">${formatCurrency(stats.inflows)}</div>
-          <div className="metric-foot">Gross Deposits</div>
+          <div className="metric-foot">Gross deposits</div>
         </div>
         
         <div className="metric-card outflow-card">
@@ -135,7 +135,7 @@ export const UnifiedFinancialPanel: React.FC<UnifiedPanelProps> = ({
             <span className="metric-chip negative">Outflow</span>
           </div>
           <div className="metric-value">${formatCurrency(stats.outflows)}</div>
-          <div className="metric-foot">Spending + Fees</div>
+          <div className="metric-foot">Spending + fees</div>
         </div>
         
         <div className="metric-card net-card">
@@ -155,7 +155,7 @@ export const UnifiedFinancialPanel: React.FC<UnifiedPanelProps> = ({
             <span className="metric-chip accent">Avg</span>
           </div>
           <div className="metric-value">${formatCurrency(stats.avgPerTxn)}</div>
-          <div className="metric-foot">Per Transaction</div>
+          <div className="metric-foot">Per transaction</div>
         </div>
       </div>
 

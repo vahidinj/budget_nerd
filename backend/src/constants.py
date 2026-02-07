@@ -37,11 +37,11 @@ DATE_START_RX = re.compile(
 
 AMOUNT_TOKEN_RX = re.compile(
     r"""
-    ^ 
+    ^
     (?:
-        \( (?P<num_paren> \$? (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? ) \)
+        \( (?P<num_paren> \$? (?: (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? | \.\d{2} ) ) \)
         |
-        (?P<sign>-)? \$? (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? (?P<trail_minus>-)?
+        (?P<sign>-)? \$? (?: (?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})? | \.\d{2} ) (?P<trail_minus>-)?
     )$
     """,
     re.VERBOSE,
@@ -122,8 +122,17 @@ DATE_FORMATS = (
 SKIP_DESC = ["Beginning Balance", "Ending Balance"]
 SKIP_CONTAINS = ["Average Daily Balance", "Beginning Balnce", "Ending Balance"]
 
-CC_PAYMENT_KEYWORDS = ["PAYMENT RECEIVED"]
-CC_CREDIT_KEYWORDS = ["CREDIT", "REFUND"]
+CC_PAYMENT_KEYWORDS = [
+    "PAYMENT RECEIVED",
+    "PAYMENT",
+    "PMT",
+    "AUTOPAY",
+    "ONLINE PAYMENT",
+    "ELECTRONIC PAYMENT",
+    "ACH PAYMENT",
+    "BILL PAYMENT",
+]
+CC_CREDIT_KEYWORDS = ["CREDIT", "REFUND", "REVERSAL"]
 
 # ============================================================================
 # Categorization Constants
