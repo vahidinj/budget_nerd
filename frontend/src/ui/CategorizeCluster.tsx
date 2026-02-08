@@ -29,10 +29,8 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
     ? 'Categorizing…'
     : ((isRefiningAI && categoriesApplied) ? 'Refining with AI…' : null);
 
-  const [showCatHelp, setShowCatHelp] = useState(false);
-  const [showAIHelp, setShowAIHelp] = useState(false);
-  const catHelpBtnRef = useRef<HTMLButtonElement | null>(null);
-  const aiHelpBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const helpBtnRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <div className="categorize-cluster" role="group" aria-label="Transaction categorization controls">
@@ -53,38 +51,30 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
               {categorizeLoading ? <span className="cat-spinner" aria-hidden="true" /> : <span className="cat-label">{categoriesApplied ? 'Uncategorize' : 'Categorize'}</span>}
             </span>
           </button>
-          {categoriesApplied && (
-            <span className="cat-status-badge" aria-live="polite" aria-label={isRefiningAI ? 'Categories applied. AI refinement running' : 'Categories applied'}>
-              <span className="cat-status-dot" aria-hidden="true" />
-              <span className="cat-status-text">Categorized</span>
-              <span className="cat-refine-slot" aria-hidden="true">
-                <span className={"ai-refine-indicator" + (isRefiningAI ? ' active':'')}>AI</span>
-              </span>
-            </span>
-          )}
           <div className="consistency-badge-wrap">
             <button
               type="button"
-              className={`dropdown-btn compact ${showCatHelp ? 'open':''}`}
-              ref={catHelpBtnRef}
-              onClick={()=> setShowCatHelp(v=>!v)}
-              aria-expanded={showCatHelp}
+              className={`dropdown-btn compact cat-help-btn ${showHelp ? 'open':''}`}
+              ref={helpBtnRef}
+              onClick={()=> setShowHelp(v=>!v)}
+              aria-expanded={showHelp}
               aria-haspopup="dialog"
               aria-controls="cat-help-pop"
-              title="How categorization works"
-            >{showCatHelp ? 'How it works ▴' : 'How it works ▾'}</button>
-            {(
-              // use PortalPopover so the popover is appended to document.body and escapes ancestor stacking contexts
-              <PortalPopover anchorRef={catHelpBtnRef} isOpen={showCatHelp} className="consistency-popover">
-                <div className="cp-head">Categorize <span className="micro">how it works</span></div>
+              title="About categorization and AI"
+            >{showHelp ? 'Info ▴' : 'Info ▾'}</button>
+            {
+              <PortalPopover anchorRef={helpBtnRef} isOpen={showHelp} className="consistency-popover">
+                <div className="cp-head">Categorize <span className="micro">and AI</span></div>
                 <ul className="cp-list">
                   <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Auto-tags transactions using pattern rules. Review and refine as needed.</span></li>
                   <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Click again to remove all categories.</span></li>
                   <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Transfers are excluded from budget totals.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">AI runs server-side. Only transaction descriptions are sent to external AI providers.</span></li>
+                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">PDFs stay on your device. Never transmitted to third parties.</span></li>
                 </ul>
-                <button className="cp-close" type="button" onClick={()=> setShowCatHelp(false)} aria-label="Close categorize help">×</button>
+                <button className="cp-close" type="button" onClick={()=> setShowHelp(false)} aria-label="Close help">×</button>
               </PortalPopover>
-            )}
+            }
           </div>
         </div>
         <div className="cat-sep" aria-hidden="true" />
@@ -100,30 +90,7 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
             <span className="dot" aria-hidden="true" />
             <span className="ai-pill-label">AI {useAI ? 'On':'Off'}</span>
           </button>
-          <div className="consistency-badge-wrap">
-            <button
-              type="button"
-              className={`dropdown-btn compact ${showAIHelp ? 'open':''}`}
-              ref={aiHelpBtnRef}
-              onClick={()=> setShowAIHelp(v=>!v)}
-              aria-expanded={showAIHelp}
-              aria-haspopup="dialog"
-              aria-controls="ai-help-pop"
-              title="About AI refinement"
-            >{showAIHelp ? 'About AI ▴' : 'About AI ▾'}</button>
-            {(
-              <PortalPopover anchorRef={aiHelpBtnRef} isOpen={showAIHelp} className="consistency-popover">
-                <div className="cp-head">AI refinement <span className="micro">optional</span></div>
-                <ul className="cp-list">
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">AI refines categories for better accuracy using pattern models.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">Runs server-side. Only transaction descriptions are sent to external AI providers.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">🔒</span><span className="msg">PDFs stay on your device. Never transmitted to third parties.</span></li>
-                  <li className="cp-item lvl-info"><span className="lvl-icon" aria-hidden="true">ℹ</span><span className="msg">Review and approve all suggestions before applying.</span></li>
-                </ul>
-                <button className="cp-close" type="button" onClick={()=> setShowAIHelp(false)} aria-label="Close AI help">×</button>
-              </PortalPopover>
-            )}
-          </div>
+          <span className={"ai-refine-indicator" + (isRefiningAI ? ' active' : '')} aria-hidden="true">AI</span>
         </div>
       </div>
       {footMsg && (

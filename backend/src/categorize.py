@@ -490,6 +490,8 @@ def categorize_with_metadata(desc: str, use_ai: bool | None = None) -> Dict[str,
         "ai_original_category": None,
         "ai_margin": None,
         "ai_best_score": None,
+        "ai_used": False,
+        "ai_changed": False,
         "skipped": False,
     }
     if not isinstance(desc, str) or not desc.strip():
@@ -522,15 +524,17 @@ def categorize_with_metadata(desc: str, use_ai: bool | None = None) -> Dict[str,
         info["base_category"] = fallback_cat
         info["source"] = "fallback"
     # AI refinement (skip if disabled or skipped earlier)
-    final, ai_candidate, margin, best_score = ai_refine_with_info(
+    final, ai_candidate, margin, api_used = ai_refine_with_info(
         desc, info["base_category"] or "", use_ai_override=use_ai
     )
     info["final_category"] = final
+    info["ai_used"] = bool(api_used)
     if ai_candidate and final != info["base_category"]:
         info["source"] = "ai"
         info["ai_original_category"] = ai_candidate
         info["ai_margin"] = margin
-        info["ai_best_score"] = best_score
+        info["ai_best_score"] = api_used
+        info["ai_changed"] = True
     return info
 
 

@@ -31,6 +31,8 @@ type Txn = {
 	category?: string; // added when categorization performed
 	category_source?: string; // regex | fallback | ai | skip | override
 	category_override_reason?: string | null;
+	ai_used?: boolean; // AI call attempted (cached or live)
+	ai_changed?: boolean; // AI changed final category
 	// Added for multi-PDF combined mode: original source file name
 	source_file?: string;
 };
@@ -1275,30 +1277,55 @@ const dailyNetChart = useMemo(() => {
 		return { total, avg, median, min, max, credits, charges };
 	}, [filteredTxns]);
 
+	const aiUsage = useMemo(() => {
+		if (!parseResult) return { usedCount: 0, changedCount: 0 };
+		let usedCount = 0;
+		let changedCount = 0;
+		for (const t of parseResult.transactions) {
+			if (t.ai_used) usedCount += 1;
+			if (t.ai_changed || t.category_source === 'ai') changedCount += 1;
+		}
+		return { usedCount, changedCount };
+	}, [parseResult]);
+
 	const aiIndicator = useMemo(() => {
 		if (backendStatus === 'down') {
-			return { text: 'AI: Backend offline', cls: 'ai-status-offline' };
+			return { text: 'AI: Backend offline', cls: 'ai-status-offline', detail: undefined };
 		}
 		if (!aiStatus) {
-			return { text: 'AI: Checking…', cls: 'ai-status-pending' };
+			return { text: 'AI: Checking…', cls: 'ai-status-pending', detail: undefined };
 		}
 		if (!aiStatus.enabled) {
-			return { text: 'AI: Disabled (server)', cls: 'ai-status-off' };
+			return { text: 'AI: Disabled (server)', cls: 'ai-status-off', detail: undefined };
 		}
 		if (!useAI) {
-			return { text: 'AI: Off', cls: 'ai-status-off' };
+			return { text: 'AI: Off', cls: 'ai-status-off', detail: undefined };
+		}
+		if (aiUsage.changedCount > 0) {
+			return {
+				text: `AI: Used (${aiUsage.changedCount})`,
+				cls: 'ai-status-ok',
+				detail: `AI changed ${aiUsage.changedCount} categor${aiUsage.changedCount === 1 ? 'y' : 'ies'}.`,
+			};
+		}
+		if (aiUsage.usedCount > 0) {
+			return {
+				text: 'AI: Used (no changes)',
+				cls: 'ai-status-ok',
+				detail: `AI ran on ${aiUsage.usedCount} row${aiUsage.usedCount === 1 ? '' : 's'} without changing categories.`,
+			};
 		}
 		if (aiStatus.last_ok === true) {
-			return { text: 'AI: Connected', cls: 'ai-status-ok' };
+			return { text: 'AI: Connected', cls: 'ai-status-ok', detail: undefined };
 		}
 		if (aiStatus.has_key === false) {
-			return { text: 'AI: API key missing', cls: 'ai-status-warn' };
+			return { text: 'AI: API key missing', cls: 'ai-status-warn', detail: undefined };
 		}
 		if (aiStatus.last_ok === false) {
-			return { text: 'AI: Error', cls: 'ai-status-error' };
+			return { text: 'AI: Error', cls: 'ai-status-error', detail: undefined };
 		}
-		return { text: 'AI: Not validated', cls: 'ai-status-warn' };
-	}, [aiStatus, backendStatus, useAI]);
+		return { text: 'AI: Enabled (not validated)', cls: 'ai-status-warn', detail: undefined };
+	}, [aiStatus, backendStatus, useAI, aiUsage]);
 
 	// (helpers moved above export functions)
 
@@ -1613,9 +1640,12 @@ const dailyNetChart = useMemo(() => {
 			const isRefine = mode === 'refine' && useAI;
 			const nextTxns = prev.transactions.map((t,i) => {
 				let cat = categories![i];
-				let source: string | undefined = metadata?.[i]?.source;
-				const overrideApplied = metadata?.[i]?.override_applied;
-				const overrideReason = metadata?.[i]?.override_reason ?? null;
+				const meta = metadata?.[i];
+				let source: string | undefined = meta?.source;
+				const overrideApplied = meta?.override_applied;
+				const overrideReason = meta?.override_reason ?? null;
+				let aiUsed = Boolean(meta?.ai_used);
+				let aiChanged = Boolean(meta?.ai_changed || meta?.source === 'ai');
 				const amt = t.amount;
 				const acct = (t.account_type || '').toLowerCase();
 				// Preserve explicit Account Transfer categorization (do not override to Income/Savings)
@@ -1642,9 +1672,17 @@ const dailyNetChart = useMemo(() => {
 						cat = 'Housing';
 						source = source || 'amount_rule';
 					}
-				// If refining with AI but backend didn't tag, mark as ai to prevent repeated loops
-				if(isRefine && (!source || source === 'regex' || source === 'fallback')) source = 'ai';
-				return { ...t, category: cat, category_source: source, category_override_reason: overrideReason };
+				if (overrideApplied) {
+					aiChanged = false;
+				}
+				// If refining with AI but backend didn't tag, mark ai only when category changes
+				if (isRefine && useAI && categories![i] !== t.category) {
+					aiChanged = true;
+					aiUsed = true;
+					if (!source || source === 'regex' || source === 'fallback') source = 'ai';
+				}
+				if (aiChanged && !source) source = 'ai';
+				return { ...t, category: cat, category_source: source, category_override_reason: overrideReason, ai_used: aiUsed, ai_changed: aiChanged };
 			});
 			const next = { ...prev, transactions: nextTxns } as ParseResponse & { transactions: Txn[] };
 			try { // update cached parse copy (augment only)
@@ -1675,7 +1713,7 @@ const dailyNetChart = useMemo(() => {
 			if(!prev) return prev;
 			const nextTxns = prev.transactions.map(t => {
 				// Strip category related fields
-				const { category, category_source, category_override_reason, ...rest } = t as any;
+				const { category, category_source, category_override_reason, ai_used, ai_changed, ...rest } = t as any;
 				return { ...rest };
 			});
 			const next = { ...prev, transactions: nextTxns } as ParseResponse & { transactions: Txn[] };
@@ -1753,7 +1791,7 @@ const dailyNetChart = useMemo(() => {
 			!categorizeLoading &&
 			!isRefiningAI &&
 			!refineAttemptedRef.current &&
-			!parseResult.transactions.some(t => t.category_source === 'ai')
+			!parseResult.transactions.some(t => t.category_source === 'ai' || t.ai_changed)
 		) {
 			refineAttemptedRef.current = true; // lock to single attempt for this dataset
 			setIsRefiningAI(true);
@@ -2278,7 +2316,7 @@ const dailyNetChart = useMemo(() => {
 								)}
 								<div
 									className={`ai-status-pill ${aiIndicator.cls}`}
-									title={aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined}
+									title={aiIndicator.detail || (aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined)}
 									aria-live="polite"
 								>
 									{aiIndicator.text}
@@ -2584,20 +2622,24 @@ const dailyNetChart = useMemo(() => {
 											{windowedRows.slice.map((t, idx) => {
 												// Find the transaction's index in the underlying parseResult.transactions
 												const globalIdx = parseResult ? parseResult.transactions.findIndex(p => p === t) : -1;
+												const aiChanged = !!t.ai_changed || t.category_source === 'ai';
 												return (
-													<tr key={globalIdx >= 0 ? globalIdx : (windowedRows.startIndex + idx)}>
+													<tr key={globalIdx >= 0 ? globalIdx : (windowedRows.startIndex + idx)} className={aiChanged ? 'ai-row' : undefined}>
 														{visibleCols.date && <td>{formatDate(t.date)}</td>}
 														{visibleCols.description && <td className="desc" title={t.description}>{highlightDescription(t.description)}</td>}
-														{visibleCols.category && <td className={"col-category " + (t.category_source === 'override' ? 'category-override' : '')}>
+														{visibleCols.category && <td className={"col-category " + (t.category_source === 'override' ? 'category-override' : '') + (aiChanged ? ' category-ai' : '')}>
 															<div style={{display:'flex', alignItems:'center', gap:8}}>
 																<select
-																	className={"category-select " + (t.category_source === 'override' ? 'override' : '')}
+																	className={"category-select " + (t.category_source === 'override' ? 'override' : '') + (aiChanged ? ' ai' : '')}
 																	value={t.category || 'Uncategorized'}
 																	onChange={e => handleCategoryChange(t, e.target.value)}
 																	aria-label={`Category for ${t.description}`}
 																>
 																	{categoryOptions.map(co => <option key={co} value={co}>{co}</option>)}
 																</select>
+																{aiChanged && (
+																	<span className="ai-change-pill" title="AI adjusted this category" aria-label="AI adjusted category">AI</span>
+																)}
 																{/* Inline mini-undo button when available for this transaction */}
 																{globalIdx >= 0 && undoState[globalIdx] && (
 																	<button
