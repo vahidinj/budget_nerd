@@ -16,7 +16,7 @@ What this means
 How to obtain a commercial license
 ----------------------------------
 To request a commercial license or discuss enterprise terms (SLA,
-indemnity, custom features), email: deanjx2015@gmail.com
+indemnity, custom features), email: athena.analytics.llc@gmail.com
 
 Typical commercial license options (examples)
 - Perpetual production license with support and maintenance

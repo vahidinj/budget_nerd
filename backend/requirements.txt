@@ -5,24 +5,19 @@
 #
 # Optional extras (NOT installed by default on EB):
 #   backend/requirements-ai.txt   -> sentence-transformers (pulls torch ~900MB)
-#   backend/requirements-viz.txt  -> plotly, matplotlib, (optional charts)
 #
 # To enable AI categories with OpenAI locally:
 #   export USE_AI_CATEGORIES=1
 #   export OPENAI_API_KEY=sk-...
 #
-# To enable visualization helpers locally:
-#   pip install -r backend/requirements-viz.txt
-#
 # If you accidentally need everything (local dev only):
-#   pip install -r backend/requirements.txt -r backend/requirements-viz.txt
+#   pip install -r backend/requirements.txt -r backend/requirements-ai.txt
 #
 # Pinned versions retained for reproducibility. Update deliberately.
 
 fastapi==0.95.0
 uvicorn[standard]==0.21.0
 gunicorn==20.1.0
-slowapi==0.1.9
 pdfplumber==0.7.6
 pydantic==1.10.11
 python-multipart==0.0.6

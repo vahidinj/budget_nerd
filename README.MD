@@ -1,6 +1,6 @@
 # Budget App
 
-Personal finance statement parser + categorizer with a React (Vite + TypeScript) frontend and a Python FastAPI backend. Supports PDF bank statement ingestion, heuristic categorization into seven canonical buckets, and optional OpenAI-powered refinement when enabled (descriptions only).
+Personal finance statement parser + categorizer with a React (Vite + TypeScript) frontend and a Python FastAPI backend. Supports PDF bank statement ingestion, heuristic categorization into seven canonical buckets, CSV/Excel export, and optional OpenAI-powered refinement when enabled (descriptions only).
 
 ## Status
 Active development. AWS deployment typically uses Elastic Beanstalk for the backend (FastAPI) and AWS Amplify for the frontend (React).
@@ -11,6 +11,7 @@ Active development. AWS deployment typically uses Elastic Beanstalk for the back
 - Optional custom category rules via JSON or runtime injection
 - Unified financial overview (totals, averages, medians, net change)
 - Filters for date range, category, and search
+- CSV and Excel exports (transactions + summary)
 - Optional OpenAI refinement (opt-in, description-only, cached)
 
 ## Security & Secret Management
@@ -67,6 +68,8 @@ If enabled, the backend sends only transaction descriptions (e.g., "STARBUCKS #1
 | `CUSTOM_CATEGORY_RULES` | JSON rules file path (alternate) | unset | Only read locally; ensure secure path |
 | `API_CORS_ORIGINS` | Comma-separated CORS origins | unset | Controls browser access only |
 | `API_TRUSTED_HOSTS` | Allowed hostnames | `mybudgetnerd.com,...` | Server safety only |
+| `ADMIN_TOKEN` | Bearer token for admin-only endpoints | unset | Required when `REQUIRE_ADMIN=1` |
+| `REQUIRE_ADMIN` | Protect admin endpoints | `1` | Disable only for local/dev |
 | `MAX_PARSE_TRANSACTIONS` | Cap parsing volume | `5000` | Performance safety only |
 
 ### Planned Hardening Before AWS
@@ -122,7 +125,7 @@ npm run dev
 ## AWS Deployment
 
 ### Backend (FastAPI) — Elastic Beanstalk
-- Deploy the backend using AWS Elastic Beanstalk (Python environment or Docker if containerized).
+- Deploy the backend using AWS Elastic Beanstalk (Python environment).
 - Set environment variables and secrets in the Elastic Beanstalk console or connect to AWS Secrets Manager.
 - Elastic Beanstalk manages scaling, health checks, and rolling deployments.
 
@@ -133,26 +136,16 @@ npm run dev
 - Amplify provides hosting, SSL, and CI/CD from your repo.
 
 ### General AWS Notes
-- The repo includes a root `Dockerfile` for container builds.
 - In production, ensure the frontend is configured to call the correct API endpoint (Elastic Beanstalk backend URL).
 
 ## Deployment
 
-Local Docker (development)
+### Frontend (Amplify) + Backend (Elastic Beanstalk)
 
- - Build and run with docker-compose:
+The React frontend is deployed independently on AWS Amplify (static hosting). The FastAPI backend runs on Elastic Beanstalk.
 
-```bash
-docker-compose build
-docker-compose up
-```
-
-### Frontend (Amplify) + Backend (App Runner) Split
-
-The React frontend can be deployed independently on AWS Amplify (static hosting). The FastAPI backend can run as a container on AWS App Runner.
-
-1. Deploy the backend container to App Runner.
-2. In Amplify console, set environment variable `VITE_API_BASE` to the App Runner service base URL (e.g. `https://abc123.us-east-1.awsapprunner.com`). Do NOT include a trailing slash.
+1. Deploy the backend to Elastic Beanstalk (Python platform).
+2. In Amplify console, set environment variable `VITE_API_BASE` to the backend base URL (e.g. `https://api.mybudgetnerd.com`). Do NOT include a trailing slash.
 3. Rebuild Amplify. The frontend constructs API calls with:
 	- Production: `https://.../parse` (etc.)
 	- Local dev (no `VITE_API_BASE`): `/api/parse` which is proxied to `localhost:8000` by `vite.config.ts`.
@@ -168,7 +161,7 @@ The repository source is visible for review and development, but
 production/commercial use is restricted until the Change Date
 (`2036-09-17`) when the code will automatically convert to the
 Apache License 2.0. To request a commercial license prior to that
-date, contact: `deanjx2015@gmail.com`.
+date, contact: `athena.analytics.llc@gmail.com`.
 
 See `LICENSE` and `LICENSE-COMMERCIAL.md` for details.
 

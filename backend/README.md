@@ -4,7 +4,7 @@
 - **Never commit secrets, credentials, or user data to this repo.**
 - All sensitive config (API keys, DB URIs, etc.) must be set via environment variables or a cloud secret manager (e.g., AWS Secrets Manager).
 - User-uploaded data is processed in memory only and not persisted unless a future feature enables it (see main README privacy section).
-- For AWS deployment, use Elastic Beanstalk (Python or Docker environment). Set secrets in the Elastic Beanstalk console or connect to AWS Secrets Manager.
+- For AWS deployment, use Elastic Beanstalk (Python environment). Set secrets in the Elastic Beanstalk console or connect to AWS Secrets Manager.
 
 ## Local Run (FastAPI)
 ```bash
@@ -27,5 +27,7 @@ Only transaction descriptions are sent to OpenAI when enabled; PDFs and full sta
 - `OPENAI_API_KEY` (required if AI enabled)
 - `OPENAI_MODEL` (default: `gpt-3.5-turbo`)
 - `CATEGORY_RULES_FILE` / `CUSTOM_CATEGORY_RULES` for regex overrides
+- `ADMIN_TOKEN` (required if `REQUIRE_ADMIN=1`)
+- `REQUIRE_ADMIN` (default: `1`)
 
 See the main project README for full security, privacy, and deployment details.

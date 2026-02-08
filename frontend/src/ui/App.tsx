@@ -213,6 +213,10 @@ export const App: React.FC = () => {
 	// Preferences & auxiliary modals (light theme removed per request)
 	const [dateFormat, setDateFormat] = useState<'mdy'|'dmy'>('mdy');
 	const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+	const [contactName, setContactName] = useState('');
+	const [contactEmail, setContactEmail] = useState('');
+	const [contactMessage, setContactMessage] = useState('');
+	const [contactOpen, setContactOpen] = useState(false);
 	// Missing UI/helper states
 	const [cachedMeta, setCachedMeta] = useState<{
 		fileName: string;
@@ -255,6 +259,26 @@ export const App: React.FC = () => {
 	
 	// Toast notifications
 	const { toasts, addToast, removeToast } = useToast();
+	const handleContactSend = useCallback(() => {
+		const message = contactMessage.trim();
+		if (!message) {
+			addToast('Please add a message before sending.', 'warning');
+			return;
+		}
+		const subject = 'Budget Nerd Contact';
+		const body = [
+			contactName ? `Name: ${contactName}` : null,
+			contactEmail ? `Email: ${contactEmail}` : null,
+			'',
+			message,
+		]
+			.filter(Boolean)
+			.join('\n');
+		const mailto = `mailto:athena.analytics.llc@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+		window.location.href = mailto;
+		addToast('Opening your email client...', 'info');
+		setContactMessage('');
+	}, [addToast, contactEmail, contactMessage, contactName]);
 
 	// Backend health polling (with custom hook)
 	usePolling(async () => {
@@ -1771,7 +1795,7 @@ const dailyNetChart = useMemo(() => {
 									<h2 className="cover-left-title">Upload Your Statement</h2>
 								{/* capability & trust sections moved to right column */}
 									{/* Tagline now lives here (replacing prior privacy pill) */}
-									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank statement or credit card statement PDF to get a clear breakdown of cash flow, categories, savings, and card activity. Files are uploaded over HTTPS and parsed in-memory; results are returned to your browser and not persisted by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are used — PDFs and sensitive details never leave the server.</p>
+									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank or credit card statement PDF and turn it into instant clarity: cash flow, categories, savings, and card activity. Files move over HTTPS, parse in-memory, and aren’t stored by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are used — PDFs, account numbers, and balances never leave the server. Plus, you can convert statement PDFs straight into Excel.</p>
 									<div className="cta-row">
 										<button ref={uploadBtnRef} className="primary-cta primary-cta--ultra" onClick={()=>fileInputRef.current?.click()} aria-describedby="cover-desc" onMouseMove={onUploadBtnMove} onMouseLeave={onUploadBtnLeave}>
 											<DragonOrbIcon size={22} className="orb-icon" />
@@ -1970,6 +1994,7 @@ const dailyNetChart = useMemo(() => {
 														<li>Budgeting and month-end reconciliation</li>
 														<li>Tracking card payoff and surplus</li>
 														<li>Spotting outliers or fee spikes</li>
+														<li>Convert statement PDFs into Excel</li>
 														<li>Cleaning up data before import</li>
 														<li>Comparing filtered vs. full statement</li>
 													</ul>
@@ -2027,15 +2052,14 @@ const dailyNetChart = useMemo(() => {
 									{/* Moved stack badges & repo link to anchored bottom-right container */}
 									<div className="dev-card" aria-labelledby="dev-heading">
 										<h2 id="dev-heading">About the Developer</h2>
-											<p><strong>Vahidin Jupic</strong> — Data Scientist & U.S. Marine Corps veteran with 9 years Department of Defense experience delivering secure, high‑integrity analytics.</p>
+											<p><strong>Vahidin Jupic</strong> — Data Scientist & U.S. Marine Corps veteran with 10 years Department of Defense experience delivering secure, high‑integrity analytics.</p>
 											<ul style={{margin:'0 0 .4rem 1rem', padding:0, listStyle:'disc', fontSize:'.58rem', lineHeight:1.35}}>
 												<li>Expertise: data extraction, NLP patterning, anomaly detection, financial normalization.</li>
 												<li>Focus: privacy‑first engineering & transparent, reviewable categorization.</li>
 												<li>Built tools supporting mission decision workflows & secure data enclaves.</li>
 											</ul>
 											<p className="dev-links">
-											<a href="https://www.linkedin.com/in/vahidin-jupic-0947b534b/" target="_blank" rel="noopener noreferrer" className="dev-link linkedin" aria-label="Open developer LinkedIn profile in new tab">Meet the Developer ↗</a>
-											<a href="https://github.com/vahidinj" target="_blank" rel="noopener noreferrer" className="dev-link" aria-label="Open project GitHub repository in new tab">GitHub ↗</a>
+											<a href="https://github.com/vahidinj/budget_nerd" target="_blank" rel="noopener noreferrer" className="dev-link" aria-label="Open project repository in new tab">Project Repo ↗</a>
 										</p>
 									</div>
 									{isDropActive && (
@@ -2045,9 +2069,7 @@ const dailyNetChart = useMemo(() => {
 									)}
 								</div>
 							</div>
-							<div className="cover-corner" aria-label="Repository link">
-								<a className="repo-link fine-print" href="https://github.com/vahidinj/pdf_parser" target="_blank" rel="noopener noreferrer" aria-label="Open project GitHub repository in new tab">GitHub Repo ↗</a>
-							</div>
+							
 						</section>
 					)}
 					<a href="#charts-start" className="skip-link">Skip to charts</a>
@@ -2665,7 +2687,53 @@ const dailyNetChart = useMemo(() => {
 						<div className="footer-left">
 							<span className="brand">mybudgetnerd.com</span>
 							<span className="sep">·</span>
-							<a href="mailto:deanjx2015@gmail.com">Contact</a>
+							<button
+								className="contact-trigger"
+								type="button"
+								aria-expanded={contactOpen}
+								aria-controls="contact-panel"
+								onClick={()=> setContactOpen(o=> !o)}
+							>
+								Contact
+								<span className="caret" aria-hidden="true">▾</span>
+							</button>
+							<div
+								id="contact-panel"
+								className={`contact-popover ${contactOpen ? 'open' : ''}`}
+								role="dialog"
+								aria-label="Contact form"
+							>
+								<div className="contact-popover-head">
+									<span>Contact the developer</span>
+									<a href="mailto:athena.analytics.llc@gmail.com" className="footer-link">athena.analytics.llc@gmail.com</a>
+								</div>
+								<div className="contact-fields">
+									<input
+										className="contact-input"
+										placeholder="Your name (optional)"
+										value={contactName}
+										onChange={(e)=> setContactName(e.target.value)}
+									/>
+									<input
+										className="contact-input"
+										type="email"
+										placeholder="Your email (optional)"
+										value={contactEmail}
+										onChange={(e)=> setContactEmail(e.target.value)}
+									/>
+									<textarea
+										className="contact-textarea"
+										rows={3}
+										placeholder="How can we help?"
+										value={contactMessage}
+										onChange={(e)=> setContactMessage(e.target.value)}
+									/>
+								</div>
+								<div className="contact-actions">
+									<button className="btn small" type="button" onClick={handleContactSend}>Send Message</button>
+									<button className="btn small ghost" type="button" onClick={()=> setContactOpen(false)}>Close</button>
+								</div>
+							</div>
 						</div>
 						<div className="footer-right">
 							<small>Secure · Private · Ephemeral</small>

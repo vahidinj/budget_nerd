@@ -195,9 +195,6 @@ except ImportError:
 _openai_client = None  # lazy
 _openai_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 _openai_cache: dict[str, str] = {}  # desc -> category
-_ai_model = None
-_ai_cat_emb = None
-_desc_emb_cache: dict[str, object] = {}
 _ai_status_cache: dict[str, object] = {
     "last_checked": None,
     "last_ok": None,
@@ -439,7 +436,6 @@ Respond with ONLY the category name, nothing else."""
 
 def clear_all_caches() -> dict[str, int | bool]:
     """Clear in-memory caches and custom rules; return a summary."""
-    global _ai_model, _ai_cat_emb
     # Clear compiled rule cache & embedding description cache
     try:
         _compile_rules.cache_clear()  # type: ignore[attr-defined]
@@ -449,18 +445,13 @@ def clear_all_caches() -> dict[str, int | bool]:
         normalize_description.cache_clear()  # type: ignore[attr-defined]
     except Exception:
         pass
-    desc_cache_size = len(_desc_emb_cache)
-    _desc_emb_cache.clear()
     # Clear custom rules
     with _custom_rules_lock:
         custom_count = len(_custom_rules)
         _custom_rules.clear()
-    # Drop loaded model/embeddings to free memory (lazy reload later)
-    _ai_model = None
-    _ai_cat_emb = None
     return {
         "custom_rules_cleared": custom_count,
-        "desc_embedding_cache_cleared": desc_cache_size,
+        "desc_embedding_cache_cleared": 0,
         "model_reset": True,
     }
 

@@ -10,7 +10,6 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.concurrency import run_in_threadpool
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
 
@@ -236,8 +235,41 @@ env_trusted = os.getenv("API_TRUSTED_HOSTS", "")
 trusted = [h.strip() for h in env_trusted.split(",") if h.strip()]
 if not trusted:
     trusted = ["mybudgetnerd.com", "www.mybudgetnerd.com", "localhost"]
+
+
+def _host_matches_allowed(host: str, allowed: str) -> bool:
+    if allowed == "*":
+        return True
+    if allowed.startswith("*."):
+        suffix = allowed[1:]
+        return host.endswith(suffix)
+    return host == allowed
+
+
+class HostValidationMiddleware(BaseHTTPMiddleware):
+    """Validate Host header for non-health endpoints in production."""
+
+    def __init__(self, app: FastAPI, allowed_hosts: list[str]):
+        super().__init__(app)
+        self.allowed_hosts = allowed_hosts
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        if api_env == "production":
+            path = request.url.path
+            if path not in {"/health", "/health-eb"}:
+                host = request.headers.get("host", "").split(":", 1)[0].strip()
+                if not host or not any(
+                    _host_matches_allowed(host, allowed)
+                    for allowed in self.allowed_hosts
+                ):
+                    return JSONResponse(
+                        status_code=400, content={"detail": "Invalid host header"}
+                    )
+        return await call_next(request)
+
+
 if api_env == "production":
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted)
+    app.add_middleware(HostValidationMiddleware, allowed_hosts=trusted)
 
 app.add_middleware(
     CORSMiddleware,
