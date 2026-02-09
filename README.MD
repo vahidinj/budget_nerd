@@ -63,7 +63,8 @@ If enabled, the backend sends only transaction descriptions (e.g., "STARBUCKS #1
 |----------|---------|---------|----------------|
 | `USE_AI_CATEGORIES` | Enable OpenAI refinement | unset (off) | None when off; description-only when on |
 | `OPENAI_API_KEY` | OpenAI API key (required if AI enabled) | unset | Enables external API calls for descriptions |
-| `OPENAI_MODEL` | OpenAI model to use | `gpt-3.5-turbo` | Affects cost/accuracy only |
+| `OPENAI_MODEL` | OpenAI model to use | `gpt-4o-mini` | Affects cost/accuracy only |
+| `OPENAI_BATCH_SIZE` | Batch size for AI requests | `20` | Lower reduces rate pressure; higher improves throughput |
 | `CATEGORY_RULES_FILE` | Path to JSON with custom regex rules | unset | Only read locally; ensure secure path |
 | `CUSTOM_CATEGORY_RULES` | JSON rules file path (alternate) | unset | Only read locally; ensure secure path |
 | `API_CORS_ORIGINS` | Comma-separated CORS origins | unset | Controls browser access only |
@@ -111,6 +112,7 @@ pip install -r requirements.txt
 pip install openai
 export USE_AI_CATEGORIES=1
 export OPENAI_API_KEY=sk-your_key_here
+export OPENAI_MODEL=gpt-4o-mini
 # The FastAPI entrypoint is `src.api:app` (module `backend/src/api.py`)
 uvicorn src.api:app --reload
 ```

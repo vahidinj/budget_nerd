@@ -182,7 +182,8 @@ Design goals:
 Configuration via environment variables:
   USE_AI_CATEGORIES=1              -> enable feature
   OPENAI_API_KEY=sk-...           -> your OpenAI API key (required if USE_AI_CATEGORIES=1)
-  OPENAI_MODEL=gpt-3.5-turbo      -> (default) model to use
+    OPENAI_MODEL=gpt-4o-mini        -> (default) model to use
+    OPENAI_BATCH_SIZE=20            -> batch size for AI requests (default 20)
 
 Cost: Each categorization uses ~20 tokens. Monitor usage at https://platform.openai.com/usage
 """
@@ -193,7 +194,8 @@ except ImportError:
     openai = None  # type: ignore
 
 _openai_client = None  # lazy
-_openai_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+_openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+_openai_batch_size = int(os.getenv("OPENAI_BATCH_SIZE", "20"))
 _openai_cache: dict[str, str] = {}  # desc -> category
 _ai_status_cache: dict[str, object] = {
     "last_checked": None,
@@ -282,6 +284,15 @@ def _get_openai_client():
         return _openai_client
     except Exception:
         return None
+
+
+def _get_openai_batch_size() -> int:
+    """Return a safe batch size for OpenAI requests."""
+    try:
+        value = int(_openai_batch_size)
+    except Exception:
+        value = 20
+    return max(1, min(value, 50))
 
 
 def warm_ai_category_model():
@@ -434,6 +445,86 @@ Respond with ONLY the category name, nothing else."""
         return base_category, None, None, None
 
 
+def _ai_refine_batch(
+    descriptions: list[str],
+    base_categories: list[str],
+) -> list[tuple[str, str | None, float | None, float | None]]:
+    """Batch OpenAI categorization. Returns list of (final, ai_candidate, confidence, api_used)."""
+    results: list[tuple[str, str | None, float | None, float | None]] = []
+    if not descriptions:
+        return results
+
+    client = _get_openai_client()
+    if client is None:
+        return [(b, None, None, None) for b in base_categories]
+
+    allowed = ", ".join(CANONICAL_CATEGORIES)
+    batch_size = _get_openai_batch_size()
+    # Pre-fill results with placeholders to preserve order
+    results = [("", None, None, None) for _ in descriptions]
+
+    # Build list of uncached items to send to API
+    pending: list[tuple[int, str, str]] = []  # (idx, desc, base)
+    for i, (desc, base) in enumerate(zip(descriptions, base_categories)):
+        key = desc.strip().upper()
+        if not desc.strip():
+            results[i] = (base, None, None, None)
+            continue
+        if key in _openai_cache:
+            cached_cat = _openai_cache[key]
+            confidence = 1.0 if cached_cat in CANONICAL_CATEGORIES else 0.0
+            ai_candidate = cached_cat if cached_cat != base else None
+            results[i] = (cached_cat, ai_candidate, confidence, 1.0)
+            continue
+        pending.append((i, desc, base))
+
+    # Process in batches
+    for offset in range(0, len(pending), batch_size):
+        chunk = pending[offset : offset + batch_size]
+        if not chunk:
+            continue
+        # Build prompt with stable ordering
+        prompt_lines = [
+            "Return ONLY a JSON array of category strings matching the inputs in order.",
+            f"Allowed categories: {allowed}",
+            "Inputs:",
+        ]
+        for i, (orig_i, desc, _base) in enumerate(chunk, start=1):
+            prompt_lines.append(f"{i}. {desc}")
+        prompt = "\n".join(prompt_lines)
+
+        try:
+            response = client.chat.completions.create(
+                model=_openai_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=200,
+            )
+            content = (
+                response.choices[0].message.content.strip() if response.choices else ""
+            )
+            parsed = json.loads(content) if content else []
+            if not isinstance(parsed, list) or len(parsed) != len(chunk):
+                parsed = [None] * len(chunk)
+        except Exception:
+            parsed = [None] * len(chunk)
+
+        for i, (orig_i, desc, base) in enumerate(chunk):
+            ai_cat = parsed[i] if isinstance(parsed[i], str) else base
+            if ai_cat not in CANONICAL_CATEGORIES:
+                ai_cat = base
+            _openai_cache[desc.strip().upper()] = ai_cat
+            confidence = 1.0
+            ai_candidate = ai_cat if ai_cat != base else None
+            results[orig_i] = (ai_cat, ai_candidate, confidence, 1.0)
+
+    # Fill any remaining placeholders with base categories
+    for i, (desc, base) in enumerate(zip(descriptions, base_categories)):
+        if results[i][0] == "":
+            results[i] = (base, None, None, None)
+    return results
+
+
 def clear_all_caches() -> dict[str, int | bool]:
     """Clear in-memory caches and custom rules; return a summary."""
     # Clear compiled rule cache & embedding description cache
@@ -543,9 +634,45 @@ def categorize_records_with_overrides(
 ) -> list[Dict[str, Any]]:
     """Categorize a list of records and apply simple overrides."""
     out: list[Dict[str, Any]] = []
+    metas: list[Dict[str, Any]] = []
+    descs: list[str] = []
+
     for rec in records:
         desc = (rec.get("description") or "") if isinstance(rec, dict) else ""
-        meta = categorize_with_metadata(desc, use_ai=use_ai)
+        meta = categorize_with_metadata(desc, use_ai=False)
+        metas.append(meta)
+        descs.append(desc)
+
+    ai_enabled = _use_ai() if use_ai is None else bool(use_ai)
+    if ai_enabled and _get_openai_client() is not None:
+        idxs: list[int] = []
+        ai_descs: list[str] = []
+        ai_bases: list[str] = []
+        for i, meta in enumerate(metas):
+            if meta.get("final_category") == "" or meta.get("skipped"):
+                continue
+            base = meta.get("base_category") or meta.get("final_category") or ""
+            if not base:
+                continue
+            idxs.append(i)
+            ai_descs.append(descs[i])
+            ai_bases.append(base)
+        if ai_descs:
+            batch_results = _ai_refine_batch(ai_descs, ai_bases)
+            for idx, (final, ai_candidate, margin, api_used) in zip(
+                idxs, batch_results
+            ):
+                meta = metas[idx]
+                meta["final_category"] = final
+                meta["ai_used"] = bool(api_used)
+                if ai_candidate and final != meta.get("base_category"):
+                    meta["source"] = "ai"
+                    meta["ai_original_category"] = ai_candidate
+                    meta["ai_margin"] = margin
+                    meta["ai_best_score"] = api_used
+                    meta["ai_changed"] = True
+
+    for meta, rec, desc in zip(metas, records, descs):
         meta["original_final_category"] = meta["final_category"]
         meta["override_applied"] = False
         meta["override_reason"] = None
