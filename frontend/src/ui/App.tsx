@@ -786,15 +786,24 @@ export const App: React.FC = () => {
 	}, [filteredTxns]);
 	const canExpandSavings = useMemo(() => {
 		const seen: Record<string,1> = {};
+		const selectedTypes = (activeAccountTypes || []).map(t => t.toLowerCase());
+		const splitSpendingTypes = new Set(['credit_card', 'checking', 'checking_account']);
+		const allowSpendingAccountSplit = selectedTypes.length === 1 && splitSpendingTypes.has(selectedTypes[0]);
 		for(const t of filteredTxns){
-			if((t.category||'').toLowerCase() !== 'savings') continue;
-			const key = (t.account_number||'').trim();
-			if(!key) continue; // ignore missing account numbers, treat as single aggregate
-			seen[key] = 1;
+			const type = (t.account_type||'').trim().toLowerCase() || 'account';
+			const rawId = (t.account_number||'').trim() || (t.account_name||'').trim() || (t.source_file||'').trim();
+			if(!rawId) continue; // ignore missing account identifiers, treat as single aggregate
+			if((t.category||'').toLowerCase() === 'savings'){
+				const key = `${type}|${rawId}`;
+				seen[key] = 1;
+			} else if(allowSpendingAccountSplit && t.amount !== undefined && t.amount < 0 && type === selectedTypes[0]){
+				const key = `${type}|${rawId}`;
+				seen[key] = 1;
+			}
 			if(Object.keys(seen).length > 1) return true;
 		}
 		return false;
-	}, [filteredTxns]);
+	}, [filteredTxns, activeAccountTypes]);
 
 	const canMonthlyAverage = useMemo(() => {
 		const dates = filteredTxns.map(t=> t.date).filter(Boolean) as string[];
@@ -993,8 +1002,16 @@ const dailyNetChart = useMemo(() => {
 	const sankeyChart = useMemo(() => {
 		if(!filteredTxns.length) return null;
 		let totalIncome = 0; let totalSavings = 0; const spendingByCat: Record<string, number> = {};
-		const savingsByAcct: Record<string, number> = {};
-		let anonCounter = 0;
+		const accountSplitByKey: Record<string, number> = {};
+		const accountSplitLabels: Record<string, string> = {};
+		const anonIndexByType: Record<string, number> = {};
+		const spendingByAccountRaw: Record<string, Record<string, number>> = {};
+		const spendingAccountTotals: Record<string, number> = {};
+		const spendingAccountLabels: Record<string, string> = {};
+		const spendingAnonIndexByType: Record<string, number> = {};
+		const selectedTypes = (activeAccountTypes || []).map(t => t.toLowerCase());
+		const splitSpendingTypes = new Set(['credit_card', 'checking', 'checking_account']);
+		const allowSpendingAccountSplit = expandSavings && selectedTypes.length === 1 && splitSpendingTypes.has(selectedTypes[0]);
 		for(const t of filteredTxns){
 			if(typeof t.amount !== 'number') continue;
 			const cat = (t.category||'').toLowerCase();
@@ -1006,14 +1023,45 @@ const dailyNetChart = useMemo(() => {
 			}
 			if(cat === 'savings' && t.amount > 0){
 				totalSavings += t.amount;
-				let key = (t.account_number||'').trim();
-				if(!key) key = `__anon_${++anonCounter}`;
-				savingsByAcct[key] = (savingsByAcct[key]||0) + t.amount;
+				const type = (t.account_type||'').trim().toLowerCase() || 'account';
+				let rawId = (t.account_number||'').trim() || (t.account_name||'').trim() || (t.source_file||'').trim();
+				if(!rawId) rawId = '__anon__';
+				const key = `${type}|${rawId}`;
+				accountSplitByKey[key] = (accountSplitByKey[key]||0) + t.amount;
+				if(!accountSplitLabels[key]){
+					const typeLabel = type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+					const digits = rawId.replace(/\D/g,'');
+					let suffix = digits ? digits.slice(-4) : '';
+					if(!suffix){
+						anonIndexByType[typeLabel] = (anonIndexByType[typeLabel]||0) + 1;
+						suffix = String(anonIndexByType[typeLabel]);
+					}
+					accountSplitLabels[key] = `${typeLabel} ${suffix}`;
+				}
 				continue;
 			}
 			if(t.amount < 0){
 				const label = t.category && cat !== 'income' && cat !== 'savings' ? t.category : 'Uncategorized';
 				spendingByCat[label] = (spendingByCat[label]||0) + Math.abs(t.amount);
+				if(allowSpendingAccountSplit){
+					const type = (t.account_type||'').trim().toLowerCase() || 'account';
+					let rawId = (t.account_number||'').trim() || (t.account_name||'').trim() || (t.source_file||'').trim();
+					if(!rawId) rawId = '__anon__';
+					const key = `${type}|${rawId}`;
+					spendingAccountTotals[key] = (spendingAccountTotals[key]||0) + Math.abs(t.amount);
+					if(!spendingAccountLabels[key]){
+						const typeLabel = type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+						const digits = rawId.replace(/\D/g,'');
+						let suffix = digits ? digits.slice(-4) : '';
+						if(!suffix){
+							spendingAnonIndexByType[typeLabel] = (spendingAnonIndexByType[typeLabel]||0) + 1;
+							suffix = String(spendingAnonIndexByType[typeLabel]);
+						}
+						spendingAccountLabels[key] = `${typeLabel} ${suffix}`;
+					}
+					const perAcct = spendingByAccountRaw[key] || (spendingByAccountRaw[key] = {});
+					perAcct[label] = (perAcct[label]||0) + Math.abs(t.amount);
+				}
 			}
 		}
 		const totalSpending = Object.values(spendingByCat).reduce((s,v)=> s+v,0);
@@ -1027,10 +1075,26 @@ const dailyNetChart = useMemo(() => {
 		}
 		const categories = catEntries.map(e=> e[0]);
 		const catValues = catEntries.map(e=> e[1]);
-		const savingsAcctKeys = Object.entries(savingsByAcct).filter(([,v])=> v>0).sort((a,b)=> b[1]-a[1]).map(([k])=> k);
-		const multiSavings = expandSavings && savingsAcctKeys.length > 1;
+		const categorySet = new Set(categories);
+		const hasOther = categorySet.has('Other');
+		const accountSplitKeys = Object.entries(accountSplitByKey).filter(([,v])=> v>0).sort((a,b)=> b[1]-a[1]).map(([k])=> k);
+		const multiSavings = expandSavings && accountSplitKeys.length > 1;
+		const spendingAccountKeys = Object.entries(spendingAccountTotals).filter(([,v])=> v>0).sort((a,b)=> b[1]-a[1]).map(([k])=> k);
+		const splitSpendingByAccount = allowSpendingAccountSplit && spendingAccountKeys.length > 1;
+		const spendingByAccountBucket: Record<string, Record<string, number>> = {};
+		if(splitSpendingByAccount){
+			for(const [acctKey, rawCats] of Object.entries(spendingByAccountRaw)){
+				const bucketed: Record<string, number> = {};
+				for(const [catName, val] of Object.entries(rawCats)){
+					let bucket = categorySet.has(catName) ? catName : (hasOther ? 'Other' : '');
+					if(!bucket) continue;
+					bucketed[bucket] = (bucketed[bucket]||0) + val;
+				}
+				if(Object.keys(bucketed).length) spendingByAccountBucket[acctKey] = bucketed;
+			}
+		}
 		const incomeIdx = 0;
-		let spendingIdx: number; let savingsIdx: number | null = null; let firstSavingsIdx = -1; let catOffset: number;
+		let spendingIdx: number; let savingsIdx: number | null = null; let firstSavingsIdx = -1; let catOffset: number; let accountOffset: number | null = null;
 		// Optional monthly averages annotation (kept compact)
 		let months = 1;
 		if(showMonthlyAverages){
@@ -1048,10 +1112,8 @@ const dailyNetChart = useMemo(() => {
 		if(multiSavings){
 			spendingIdx = nodes.length; nodes.push(`Spending${avgSuffix(totalSpending)}`);
 			firstSavingsIdx = nodes.length;
-			savingsAcctKeys.forEach((acctKey, i) => {
-				const digits = acctKey.replace(/\D/g,'');
-				const suffix = digits ? digits.slice(-4) : String(i+1);
-				nodes.push(`Savings ${suffix}`);
+			accountSplitKeys.forEach((acctKey) => {
+				nodes.push(accountSplitLabels[acctKey] || 'Account');
 			});
 			catOffset = nodes.length; // provisional; may shift if Unallocated added
 		} else {
@@ -1066,6 +1128,12 @@ const dailyNetChart = useMemo(() => {
 		let unallocatedIdx: number | null = null;
 		if(residual > Math.max(0.005 * totalIncome, 1)){ // show if >0.5% of income or >1 unit
 			unallocatedIdx = nodes.length; nodes.push(`Unallocated${avgSuffix(residual)}`);
+		}
+		if(splitSpendingByAccount){
+			accountOffset = nodes.length;
+			spendingAccountKeys.forEach(k => {
+				nodes.push(spendingAccountLabels[k] || 'Account');
+			});
 		}
 		catOffset = nodes.length;
 		nodes.push(...categories);
@@ -1103,18 +1171,20 @@ const dailyNetChart = useMemo(() => {
 				const [r,g,b] = hexToRgb(hex);
 				return `rgba(${r}, ${g}, ${b}, ${a})`;
 			};
-		const savingsValues = multiSavings ? savingsAcctKeys.map(k => savingsByAcct[k]) : [];
-	let savingsGradient = multiSavings ? valueGradient(savingsValues, CHART_COLORS.savingsLight, CHART_COLORS.savings) : [];
-	let categoryGradient = valueGradient(catValues, CHART_COLORS.accent, CHART_COLORS.negative);
+		const savingsValues = multiSavings ? accountSplitKeys.map(k => accountSplitByKey[k]) : [];
+		let savingsGradient = multiSavings ? valueGradient(savingsValues, CHART_COLORS.savingsLight, CHART_COLORS.savings) : [];
+		let categoryGradient = valueGradient(catValues, CHART_COLORS.accent, CHART_COLORS.negative);
+		let spendingAccountGradient = splitSpendingByAccount ? valueGradient(spendingAccountKeys.map(k => spendingAccountTotals[k]), CHART_COLORS.accent, CHART_COLORS.negative) : [];
 		// Reverse gradient order per user request
 		if(savingsGradient.length) savingsGradient = [...savingsGradient].reverse();
 		if(categoryGradient.length) categoryGradient = [...categoryGradient].reverse();
+			if(spendingAccountGradient.length) spendingAccountGradient = [...spendingAccountGradient].reverse();
 		if(multiSavings){
 			if(allocSpending>0){ source.push(incomeIdx); target.push(spendingIdx); value.push(allocSpending); linkColor.push(hexToRgba(CHART_COLORS.accent,0.7)); }
 			if(allocSavings>0){
 				let remaining = allocSavings;
-				savingsAcctKeys.forEach((k,i)=> {
-					const v = savingsByAcct[k];
+				accountSplitKeys.forEach((k,i)=> {
+					const v = accountSplitByKey[k];
 					if(v>0 && remaining>0){
 						const capped = Math.min(v, remaining);
 						remaining -= capped;
@@ -1129,8 +1199,49 @@ const dailyNetChart = useMemo(() => {
 			if(allocSavings>0 && savingsIdx!==null){ source.push(incomeIdx); target.push(savingsIdx); value.push(allocSavings); linkColor.push(hexToRgba(CHART_COLORS.savings,0.7)); }
 			if(allocSpending>0){ source.push(incomeIdx); target.push(spendingIdx); value.push(allocSpending); linkColor.push(hexToRgba(CHART_COLORS.accent,0.7)); }
 		}
+		if(splitSpendingByAccount && accountOffset!==null){
+			spendingAccountKeys.forEach((k,i)=> {
+				const v = spendingAccountTotals[k];
+				if(v>0){
+					source.push(spendingIdx);
+					target.push(accountOffset + i);
+					value.push(v);
+					linkColor.push(hexToRgba(spendingAccountGradient[i],0.55));
+				}
+			});
+		}
 	if(unallocatedIdx!==null){ source.push(incomeIdx); target.push(unallocatedIdx); value.push(residual); linkColor.push(hexToRgba(CHART_COLORS.muted,0.55)); }
-		catValues.forEach((v,i)=> { if(v>0){ source.push(spendingIdx); target.push(catOffset + i); value.push(v); linkColor.push(hexToRgba(categoryGradient[i],0.34)); }});
+		if(splitSpendingByAccount && accountOffset!==null){
+			spendingAccountKeys.forEach((acctKey, i)=> {
+				const byCat = spendingByAccountBucket[acctKey] || {};
+				categories.forEach((catName, catIdx)=> {
+					const v = byCat[catName] || 0;
+					if(v>0){
+						source.push(accountOffset + i);
+						target.push(catOffset + catIdx);
+						value.push(v);
+						linkColor.push(hexToRgba(categoryGradient[catIdx],0.34));
+					}
+				});
+			});
+		} else {
+			catValues.forEach((v,i)=> { if(v>0){ source.push(spendingIdx); target.push(catOffset + i); value.push(v); linkColor.push(hexToRgba(categoryGradient[i],0.34)); }});
+		}
+		// Sort links by size within each source for clearer branch ordering
+		const linkOrder = value.map((_, i) => i).sort((a,b) => {
+			const srcDiff = source[a] - source[b];
+			if(srcDiff !== 0) return srcDiff;
+			return value[b] - value[a];
+		});
+		const reorder = <T,>(arr: T[]) => linkOrder.map(i => arr[i]);
+		const orderedSource = reorder(source);
+		const orderedTarget = reorder(target);
+		const orderedValue = reorder(value);
+		const orderedColor = reorder(linkColor);
+		source.splice(0, source.length, ...orderedSource);
+		target.splice(0, target.length, ...orderedTarget);
+		value.splice(0, value.length, ...orderedValue);
+		linkColor.splice(0, linkColor.length, ...orderedColor);
 		const srcTotals: Record<number, number> = {};
 		value.forEach((v,i)=> { srcTotals[source[i]] = (srcTotals[source[i]]||0) + v; });
 		for(let i=0;i<value.length;i++){ const tot = srcTotals[source[i]]||0; customPercent[i] = tot? (value[i]/tot*100) : 0; }
@@ -1142,21 +1253,31 @@ const dailyNetChart = useMemo(() => {
 			nodeColors = [CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.accent];
 		}
 		if(unallocatedIdx!==null){ nodeColors.push(CHART_COLORS.muted); }
+		if(splitSpendingByAccount && accountOffset!==null){
+			nodeColors.push(...spendingAccountGradient);
+		}
 		nodeColors.push(...categoryGradient);
 		// --- Explicit node positioning to align Savings & Unallocated with Spending layer ---
 		const nodeX = new Array(nodes.length).fill(0);
 		const nodeY = new Array(nodes.length).fill(0);
-		const incomeX = 0.03;
-		const allocX = 0.38; // Allocation layer (Spending, Savings, Unallocated, per-account savings)
-		const catX = 0.85;   // Category layer
+		const wideFlow = splitSpendingByAccount;
+		const incomeX = wideFlow ? 0.015 : 0.02;
+		const allocX = wideFlow ? 0.45 : 0.42; // Allocation layer (Spending, Savings, Unallocated, per-account savings)
+		const accountX = wideFlow ? 0.75 : 0.72; // Account layer (per-card/checking)
+		const catX = wideFlow ? 0.95 : 0.93;   // Category layer
 		nodeX[incomeIdx] = incomeX; nodeY[incomeIdx] = 0.5;
 		// Collect allocation indices
 		const allocationIndices: number[] = [];
 		allocationIndices.push(spendingIdx);
 		if(multiSavings){
-			for(let i=0;i<savingsAcctKeys.length;i++){ allocationIndices.push(firstSavingsIdx + i); }
+			for(let i=0;i<accountSplitKeys.length;i++){ allocationIndices.push(firstSavingsIdx + i); }
 		}else if(savingsIdx!==null){ allocationIndices.push(savingsIdx); }
 		if(unallocatedIdx!==null) allocationIndices.push(unallocatedIdx);
+		// Account indices
+		const accountIndices: number[] = [];
+		if(splitSpendingByAccount && accountOffset!==null){
+			for(let i=0;i<spendingAccountKeys.length;i++){ accountIndices.push(accountOffset + i); }
+		}
 		// Unique & sort for stability
 		const allocUnique = [...new Set(allocationIndices)];
 		// Category indices
@@ -1172,10 +1293,12 @@ const dailyNetChart = useMemo(() => {
 		};
 		allocUnique.forEach(i=> { nodeX[i] = allocX; });
 		distribute(allocUnique, 0.15, 0.85);
+		accountIndices.forEach(i=> { nodeX[i] = accountX; });
+		distribute(accountIndices, 0.12, 0.88);
 		categoryIndices.forEach(i=> { nodeX[i] = catX; });
 		distribute(categoryIndices, 0.06, 0.94);
-			return { data:[{ type:'sankey', orientation:'h', node:{ pad:12, thickness:14, label:nodes, color:nodeColors, line:{ color:CHART_COLORS.muted, width:1 }, x: nodeX, y: nodeY }, link:{ source, target, value, color:linkColor, customdata: customPercent, hovertemplate:'%{source.label} → %{target.label}<br><b>%{value:,.0f}</b> (%{customdata:.1f}% of source)<extra></extra>' } }], layout:{ height: multiSavings? 260:220, title:{ text:'Income Allocation Sankey', font:{ color:PLOT_COLORS.text, size:13 } }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, margin:{ l:20, r:20, t:34, b:10 } } };
-	}, [filteredTxns, expandSavings, showMonthlyAverages]);
+			return { data:[{ type:'sankey', orientation:'h', node:{ pad: wideFlow ? 18 : 16, thickness:14, label:nodes, color:nodeColors, line:{ color:CHART_COLORS.muted, width:1 }, x: nodeX, y: nodeY }, link:{ source, target, value, color:linkColor, customdata: customPercent, hovertemplate:'%{source.label} → %{target.label}<br><b>%{value:,.0f}</b> (%{customdata:.1f}% of source)<extra></extra>' } }], layout:{ height: (multiSavings || splitSpendingByAccount)? 260:220, title:{ text:'Income Allocation Sankey', font:{ color:PLOT_COLORS.text, size:13 } }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, margin:{ l:20, r: wideFlow ? 38 : 30, t:34, b:10 } } };
+	}, [filteredTxns, expandSavings, showMonthlyAverages, activeAccountTypes]);
 
 		// --- Account display helpers (savings labeling) ---
 		const savingsAccountLabelMap = useMemo(() => {
@@ -1196,6 +1319,33 @@ const dailyNetChart = useMemo(() => {
 			return map;
 		}, [filteredTxns]);
 
+		const creditCardLabelMap = useMemo(() => {
+			const map: Record<string,string> = {};
+			let anonIdx = 0;
+			for(const t of filteredTxns){
+				if((t.account_type||'').toLowerCase() !== 'credit_card') continue;
+				let key = (t.account_number||'').trim();
+				if(!key){
+					key = (t.account_name||'').trim();
+				}
+				if(!key){
+					key = (t.source_file||'').trim();
+				}
+				if(!key) key='__anon__';
+				if(!(key in map)){
+					const digits = key.replace(/\D/g,'');
+					if(digits){
+						map[key] = `Credit Card ${digits.slice(-4)}`;
+					} else if(key==='__anon__'){
+						map[key] = `Credit Card ${++anonIdx}`;
+					} else {
+						map[key] = `Credit Card ${++anonIdx}`;
+					}
+				}
+			}
+			return map;
+		}, [filteredTxns]);
+
 		const getAccountDisplay = useCallback((t: Txn) => {
 			const type = (t.account_type||'').trim();
 			if(!type) return '';
@@ -1204,11 +1354,18 @@ const dailyNetChart = useMemo(() => {
 				let key = (t.account_number||'').trim(); if(!key) key='__anon__';
 				return savingsAccountLabelMap[key] || 'Savings';
 			}
+			if(lower==='credit_card'){
+				let key = (t.account_number||'').trim();
+				if(!key) key = (t.account_name||'').trim();
+				if(!key) key = (t.source_file||'').trim();
+				if(!key) key='__anon__';
+				return creditCardLabelMap[key] || 'Credit Card';
+			}
 			if(t.account_number){
 				const digits = t.account_number.replace(/\D/g,''); if(digits){ return `${type.charAt(0).toUpperCase()+type.slice(1)} ${digits.slice(-4)}`; }
 			}
 			return type.charAt(0).toUpperCase()+type.slice(1);
-		}, [savingsAccountLabelMap]);
+		}, [savingsAccountLabelMap, creditCardLabelMap]);
 
 	const downloadCSV = useCallback(() => {
 		if (!filteredTxns.length) return;
@@ -2508,15 +2665,14 @@ const dailyNetChart = useMemo(() => {
 										{showSankeyFlow && sankeyChart ? (
 											<span className="chart-info" tabIndex={0} aria-label="Flow view: Income allocated to Savings, Spending and any Unallocated remainder; Spending split into top negative outflow categories; percentages show share of source node.">i
 												<span className="tooltip" role="tooltip">
-													<strong>Income Allocation Flow</strong><br/>Tracks how positive <em>Income</em> splits into <em>Savings</em>, <em>Spending</em>{' '}
-													{`and${' '}Unallocated (if residual exists).`} Outbound Spending then fans out to top category outflows.
+													<strong>Income Allocation Flow</strong><br/>Shows how Income moves into Savings and Spending, then into top expense categories.
 													<ul>
-														<li><span className="kw-accent">Income</span>: Sum of positive transactions categorized 'Income'.</li>
-														<li><span className="kw-accent">Savings</span>: Positive 'Savings' contributions (optionally split by account).</li>
-														<li><span className="kw-risk">Spending Categories</span>: Absolute value of negative amounts (non Income/Savings) grouped; top N + Other.</li>
-														<li>Unallocated appears if Income exceeds Savings + Spending during the window.</li>
-														<li>Hover % = portion of the source node (not global total).</li>
-														<li>Avg / Month adds per‑month figures when span &gt; 1 month.</li>
+														<li><span className="kw-accent">Income</span>: Positive rows categorized Income.</li>
+														<li><span className="kw-accent">Savings</span>: Positive rows categorized Savings.</li>
+														<li><span className="kw-risk">Spending</span>: Negative rows (non Income/Savings).</li>
+														<li><span className="kw-accent">Account Split</span>: With one Credit Card or Checking type selected, Spending splits per account before categories.</li>
+														<li>Unallocated shows if Income exceeds Savings + Spending.</li>
+														<li>Hover % = share of the source node.</li>
 													</ul>
 												</span>
 											</span>
@@ -2554,8 +2710,8 @@ const dailyNetChart = useMemo(() => {
 											<>
 												<Plot {...sankeyChart} className="plot-inner" useResizeHandler />
 												<div className="chart-toggle-panel" aria-label="Sankey display options">
-													<label className={!canExpandSavings? 'disabled':''} title={canExpandSavings? 'Show each savings account separately' : 'Only one savings account found'}>
-														<input type="checkbox" disabled={!canExpandSavings} checked={canExpandSavings && expandSavings} onChange={e=> setExpandSavings(e.target.checked)} /> <span>Savings Split</span>
+													<label className={!canExpandSavings? 'disabled':''} title={canExpandSavings? 'Show each account separately' : 'Only one account found'}>
+														<input type="checkbox" disabled={!canExpandSavings} checked={canExpandSavings && expandSavings} onChange={e=> setExpandSavings(e.target.checked)} /> <span>Account Split</span>
 													</label>
 													<label className={!canMonthlyAverage? 'disabled':''} title={canMonthlyAverage? 'Show average per month in labels' : 'Need >1 month span'}>
 														<input type="checkbox" disabled={!canMonthlyAverage} checked={canMonthlyAverage && showMonthlyAverages} onChange={e=> setShowMonthlyAverages(e.target.checked)} /> <span>Avg / Month</span>

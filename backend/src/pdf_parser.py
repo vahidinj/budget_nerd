@@ -20,7 +20,8 @@ from .constants import (
     DATE_PREFIX_RX,
     CREDIT_CARD_DETECT_PATTERNS,
     CC_TXN_LINE_RX,
-    CC_PAYMENT_KEYWORDS,
+    CC_SECTION_HEADER_RX,
+    # CC_PAYMENT_KEYWORDS,
     CC_CREDIT_KEYWORDS,
     DATE_FORMATS,
     SKIP_DESC,
@@ -43,6 +44,10 @@ ACCOUNT_NUMBER_LABEL_RX = re.compile(
 )
 ACCOUNT_SUMMARY_NAME_RX = re.compile(
     r"^(?P<name>.+?)\s+Account Summary$", re.IGNORECASE
+)
+ACCOUNT_HEADER_ALT_RX = re.compile(
+    r"(?P<name>[A-Z]{3,}(?:\s+[A-Z]{3,}){0,2})\s+ACCOUNT\s*(?P<number>\d{6,})(?:,?\s*cont\.)?",
+    re.IGNORECASE,
 )
 SECTION_CREDIT_RX = re.compile(
     r"\b(Deposits?|Credits?|Other Additions|Other Credits|Additions|Payments and Credits|Interest)\b",
@@ -90,6 +95,19 @@ TABLE_LAYOUTS = {
 SECTION_HEADER_HINT_RX = re.compile(
     r"\bThere (?:were|was)\b|\btotaling\b", re.IGNORECASE
 )
+ACCOUNT_TYPE_HINTS = {
+    "checking": re.compile(r"\bchecking\b|jointchecking", re.IGNORECASE),
+    "savings": re.compile(
+        r"\bsavings\b|savingsjoint|money\s+market|mmsa", re.IGNORECASE
+    ),
+}
+BANNER_SKIP_RX = re.compile(
+    r"AccountSummary|FeeSummary|DepositsAtaGlance|AnnualPercentageYieldEarned",
+    re.IGNORECASE,
+)
+SUMMARY_DATES_AMOUNTS_RX = re.compile(
+    r"^(\d{1,2}[/-]\d{1,2}\s+\$?\d[\d,]*\.\d{2})(\s+\d{1,2}[/-]\d{1,2}\s+\$?\d[\d,]*\.\d{2})+$"
+)
 CC_PAYMENT_STRICT_RX = re.compile(
     r"\b(PAYMENT RECEIVED|ONLINE PAYMENT|ELECTRONIC PAYMENT|ACH PAYMENT|BILL PAYMENT|AUTO ?PAY|AUTOPAY)\b",
     re.IGNORECASE,
@@ -128,14 +146,22 @@ def detect_credit_card(lines: Iterable[str]) -> bool:
     """Light heuristic to detect credit-card statements.
 
     Stops early once 2 distinct CC indicator patterns are found. Accepts any
-    iterable of strings; will only examine the first 120 items.
+    iterable of strings; will only examine the first 1500 items.
     """
     if lines is None:
         return False
     score = 0
-    for ln in islice(lines, 120):
+    for ln in islice(lines, 1500):
         if not isinstance(ln, str):
             ln = str(ln)
+        if CC_TXN_LINE_RX.match(ln):
+            return True
+        if CC_SECTION_HEADER_RX.search(ln):
+            score += 2
+            if score >= 2:
+                return True
+        if re.search(r"\bCREDIT\s+CARD\b", ln, re.IGNORECASE):
+            score += 1
         for rx in CREDIT_CARD_DETECT_PATTERNS:
             if rx.search(ln):
                 score += 1
@@ -347,6 +373,55 @@ def should_skip_desc(desc: str) -> bool:
     return False
 
 
+def normalize_marker_text(desc: str) -> str:
+    return re.sub(r"[^a-z]+", "", desc.lower())
+
+
+def sanitize_account_name(name: str) -> str:
+    parts = [p for p in re.split(r"\s+", name.strip()) if p]
+    if not parts:
+        return name
+    drop_words = {
+        "AMOUNT",
+        "BALANCE",
+        "DATE",
+        "POSTED",
+        "EFFECTIVE",
+        "TRANSACTIONDESCRIPTION",
+        "TRANSACTION",
+        "DETAIL",
+    }
+    cleaned = [p for p in parts if p.upper() not in drop_words]
+    if not cleaned:
+        return parts[-1]
+    return " ".join(cleaned)
+
+
+def select_account_from_line(line: str) -> tuple[str | None, str | None, str | None]:
+    matches = list(ACCOUNT_HEADER_ALT_RX.finditer(line))
+    if not matches:
+        return None, None, None
+    savings_hint = ACCOUNT_TYPE_HINTS["savings"].search(line)
+    checking_hint = ACCOUNT_TYPE_HINTS["checking"].search(line)
+    if savings_hint and checking_hint:
+        target_pos = savings_hint.start()
+        acct_type = "savings"
+    elif savings_hint:
+        target_pos = savings_hint.start()
+        acct_type = "savings"
+    elif checking_hint:
+        target_pos = checking_hint.start()
+        acct_type = "checking"
+    else:
+        m = matches[-1]
+        name = sanitize_account_name(m.group("name"))
+        return name, m.group("number"), classify_account(name)
+    prior = [m for m in matches if m.end() <= target_pos]
+    m = prior[-1] if prior else matches[0]
+    name = sanitize_account_name(m.group("name"))
+    return name, m.group("number"), acct_type
+
+
 def detect_layout(lines: List[str], credit_card_mode: bool) -> str:
     if credit_card_mode:
         return "credit_card"
@@ -422,7 +497,13 @@ def parse_line(
     if not description:
         return None
     # Handle explicit beginning / ending balance marker lines so they are not flagged unparsed
-    if description in {"Beginning Balance", "Ending Balance"}:
+    marker_key = normalize_marker_text(description)
+    if description in {"Beginning Balance", "Ending Balance"} or marker_key in {
+        "beginningbalance",
+        "previousbalance",
+        "endingbalance",
+        "closingdateendingbalance",
+    }:
         bal_val = None
         if len(trailing) == 1:
             bal_val = normalize_number(trailing[0])
@@ -721,6 +802,15 @@ def parse_bank_statement(
             account_number = hdr.group("number")
             account_type = classify_account(account_name)
             daily_balance_mode = False
+        alt_name, alt_number, alt_type = select_account_from_line(line)
+        if alt_name or alt_number or alt_type:
+            if alt_name:
+                account_name = alt_name
+            if alt_number:
+                account_number = alt_number
+            if alt_type:
+                account_type = alt_type
+            daily_balance_mode = False
         acct_label = ACCOUNT_NUMBER_LABEL_RX.search(line)
         if acct_label:
             acct_digits = re.sub(r"\D", "", acct_label.group(1))
@@ -729,6 +819,14 @@ def parse_bank_statement(
         if acct_summary and not account_name:
             account_name = acct_summary.group("name").strip()
             account_type = classify_account(account_name)
+        if ACCOUNT_TYPE_HINTS["checking"].search(line):
+            account_type = "checking"
+        elif ACCOUNT_TYPE_HINTS["savings"].search(line):
+            account_type = "savings"
+        if SUMMARY_DATES_AMOUNTS_RX.match(line):
+            continue
+        if BANNER_SKIP_RX.search(line):
+            continue
         if is_section_header(line):
             credit_hit = SECTION_CREDIT_RX.search(line)
             debit_hit = SECTION_DEBIT_RX.search(line)
@@ -879,7 +977,9 @@ def parse_bank_statement(
                 df = df[~mask_all_none]
             # Normalize account types: if credit_card present keep it; else collapse to checking/savings
             if "account_type" in df.columns:
-                if (df["account_type"] == "credit_card").any():
+                if credit_card_mode:
+                    df["account_type"] = "credit_card"
+                elif (df["account_type"] == "credit_card").any():
                     df.loc[df["account_type"].isna(), "account_type"] = "credit_card"
                 else:
                     df["account_type"] = (
