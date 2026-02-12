@@ -982,7 +982,7 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
     width:auto !important;
   }
   .table-controls .table-categorize .cat-main-row { flex-wrap:nowrap; }
-  .table-controls .table-columns { justify-content:flex-end; min-width:max-content; margin-left:-3rem; }
+  .table-controls .table-columns { justify-content:flex-end; min-width:max-content; margin-left:-2rem; }
   .table-controls .table-date-range label { height:20px; align-items:center; padding:.06rem .18rem; }
   .table-controls .table-date-range .date-picker-display {
     height:auto;
