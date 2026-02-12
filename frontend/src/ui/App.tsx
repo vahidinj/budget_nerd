@@ -1612,6 +1612,18 @@ const dailyNetChart = useMemo(() => {
 	// Consistency issues popover state
 	const [showConsistencyDetails, setShowConsistencyDetails] = useState(false);
 	const consistencyRef = useRef<HTMLDivElement|null>(null);
+	// Chart tooltip popover state (click to open)
+	const [openChartTooltip, setOpenChartTooltip] = useState<string | null>(null);
+	const toggleChartTooltip = useCallback((id: string) => {
+		setOpenChartTooltip(prev => (prev === id ? null : id));
+	}, []);
+	// Mobile modebar toggle (show on tap)
+	const [activeModebarChart, setActiveModebarChart] = useState<string | null>(null);
+	const toggleModebar = useCallback((id: string, e: React.MouseEvent) => {
+		const target = e.target as HTMLElement | null;
+		if(target && target.closest('.chart-info, .sankey-toggle-panel, .chart-toggle-panel')) return;
+		setActiveModebarChart(prev => (prev === id ? null : id));
+	}, []);
 	useEffect(()=> {
 		if(!showConsistencyDetails) return;
 		const onDocClick = (e: MouseEvent) => {
@@ -1625,6 +1637,18 @@ const dailyNetChart = useMemo(() => {
 		document.addEventListener('keydown', onKey);
 		return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey); };
 	}, [showConsistencyDetails]);
+	useEffect(() => {
+		if(!openChartTooltip) return;
+		const onDocClick = (e: MouseEvent) => {
+			const target = e.target as HTMLElement | null;
+			if(target && target.closest('.chart-info')) return;
+			setOpenChartTooltip(null);
+		};
+		const onKey = (e: KeyboardEvent) => { if(e.key === 'Escape') setOpenChartTooltip(null); };
+		document.addEventListener('mousedown', onDocClick);
+		document.addEventListener('keydown', onKey);
+		return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey); };
+	}, [openChartTooltip]);
 
 	// Persist UI prefs (single unified writer)
 	useEffect(() => {
@@ -1638,12 +1662,12 @@ const dailyNetChart = useMemo(() => {
 	useEffect(()=> { try { localStorage.setItem('expandSavings', JSON.stringify(expandSavings)); } catch {/* ignore */} }, [expandSavings]);
 	useEffect(()=> { if(!canExpandSavings && expandSavings) setExpandSavings(false); }, [canExpandSavings, expandSavings]);
 	useEffect(()=> { try { localStorage.setItem('showSankeyFlow', JSON.stringify(showSankeyFlow)); } catch {/* ignore */} }, [showSankeyFlow]);
+	useEffect(()=> { if(!categoriesApplied && showSankeyFlow) setShowSankeyFlow(false); }, [categoriesApplied, showSankeyFlow]);
 	// Simple manual virtualization (windowed rendering) to avoid heavy dependencies if mismatch
 	// Windowed rows (virtualization) — explicitly clamp to show at least 11 rows
 	const windowedRows = useWindowedRows(filteredTxns, TXN_ROW_HEIGHT, 5, 400, 600, 11);
 
 	// Consolidated Filters dropdown state
-	const [showFilterPanel, setShowFilterPanel] = useState(true);
 	// Progressive disclosure: hide advanced charts until user categorizes or explicitly enables
 	const [showAdvancedCharts, setShowAdvancedCharts] = useState(true);
 
@@ -2458,102 +2482,6 @@ const dailyNetChart = useMemo(() => {
 								{/* Payoff ratio metric removed per request */}
 							</section>
 					)}
-						{parseResult && (
-						<section className="filters consolidated">
-							<div className="filters-head">
-								<button className="filters-toggle" aria-expanded={showFilterPanel} onClick={()=> setShowFilterPanel(o=>!o)}>{showFilterPanel? 'Hide Filters':'Show Filters'}</button>
-								{shouldShowReset && (
-									<button className="clear-filters inline head-clear" onClick={()=>{
-										setRawFilter(''); setFilter(''); setActiveAccountTypes([]); setActiveSources([]);
-										// Restore to dataset bounds if available, else clear
-										setDateStart(dataMinDate || '');
-										setDateEnd(dataMaxDate || '');
-										setLiveStatus('Filters reset to defaults.');
-									}}>Reset</button>
-								)}
-								<div
-									className={`ai-status-pill ${aiIndicator.cls}`}
-									title={aiIndicator.detail || (aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined)}
-									aria-live="polite"
-								>
-									{aiIndicator.text}
-								</div>
-							</div>
-							{showFilterPanel && (
-										<>
-											<div className="filters-panel" role="region" aria-label="Filter controls">
-												<div className="filter-primary-row grid2">
-													<div className="primary-left">
-														<div className="search-composite" role="group" aria-label="Search by description and date range">
-																<input ref={filterInputRef} className="filter-text" placeholder="Search description" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
-															<div className="date-range compact inside-search" aria-label="Date range">
-																<label><span className="lbl">Start Date</span><DatePicker value={dateStart} onChange={setDateStart} ariaLabel="Start date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
-																<label><span className="lbl">End Date</span><DatePicker value={dateEnd} onChange={setDateEnd} ariaLabel="End date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
-															</div>
-														</div>
-													</div>
-													<div className="primary-right">
-														<CategorizeCluster
-															onUncategorize={uncategorizeAll}
-															categoriesApplied={categoriesApplied}
-															categorizeLoading={categorizeLoading}
-															isRefiningAI={isRefiningAI}
-															useAI={useAI}
-															onCategorize={() => categorizeTransactions('initial')}
-															onToggleAI={() => { if(useAI){ setUseAI(false); return; } requestEnableAI(); }}
-															justCategorizedFlash={justCategorizedFlash}
-														/>
-													</div>
-												</div>
-											</div>
-											{/* Advanced filters collapsible */}
-											{(() => {
-												const totalSources = (parseResult as any).sources ? (parseResult as any).sources.length : 0;
-												return (
-													<div className="filters-advanced">
-														<div className="filters-advanced-body">
-															<div className="filters-secondary-row">
-																<div className="type-chips" aria-label="Account type filters">
-																	{(parseResult.metrics.account_types || []).map(t => { const active = activeAccountTypes.includes(t); return <button key={t} className={active ? 'chip active' : 'chip'} onClick={() => setActiveAccountTypes(prev => active ? prev.filter(x => x !== t) : [...prev, t])}>{t}</button>; })}
-																</div>
-																{/* Source file toggles (multi-PDF mode) */}
-																{(parseResult as any).sources && (parseResult as any).sources.length > 1 && (
-																	<div className="source-chips" aria-label="Source file filters">
-																		{(parseResult as any).sources.map((s: any) => {
-																			const name = s.fileName;
-																			const active = activeSources.includes(name) || activeSources.length===0; // if none selected treat as all active
-																			return <button key={name} className={active ? 'chip active' : 'chip'} onClick={() => {
-																				setActiveSources(prev => {
-																					if(prev.includes(name)) { const next = prev.filter(x=> x!==name); return next; }
-																					return [...prev, name];
-																				});
-																			}} title="Toggle inclusion of this source file in views">{name}</button>;
-																		})}
-																	</div>
-																)}
-																<div className="col-toggle-group compact" aria-label="Column visibility">
-																	{Object.entries(visibleCols).map(([key, val]) => (
-																		<button
-																			key={key}
-																			type="button"
-																			className={"col-toggle-btn" + (val ? ' active' : '')}
-																			aria-pressed={val}
-																			onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
-																			title={(val? 'Hide ':'Show ') + key + ' column'}
-																		>
-																			<span className="indicator" aria-hidden="true" />{key}
-																		</button>
-																	))}
-																</div>
-															</div>
-														</div>
-													</div>
-												);
-											})()}
-										</>
-									)}
-						</section>
-					)}
 						{/* AI consent modal temporarily removed for structural debugging */}
 						{showAIConsent && (
 							<div className="themed-modal ai-consent-layer" role="dialog" aria-modal="true" aria-labelledby="aiConsentTitle" aria-describedby="aiConsentBody">
@@ -2610,16 +2538,25 @@ const dailyNetChart = useMemo(() => {
 							<span id="charts-start" className="sr-only" />
 							<React.Suspense fallback={<div className="chart" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:180}}>Loading charts…</div>}>
 									{filteredVsOverallChart && (
-									<div className="chart">
-										<span className="chart-info" tabIndex={0} aria-label="Filtered vs Overall: Compare net result of your current filters against the full statement to estimate focus impact.">i
+									<div className={"chart" + (activeModebarChart==='filtered-overall' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('filtered-overall', e)}>
+										<span
+											className={"chart-info" + (openChartTooltip==='filtered-overall' ? ' open' : '')}
+											tabIndex={0}
+											role="button"
+											aria-haspopup="dialog"
+											aria-expanded={openChartTooltip==='filtered-overall'}
+											aria-label="Filtered vs Overall: Compare net result of your current filters against the full statement to estimate focus impact."
+											onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('filtered-overall'); }}
+											onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('filtered-overall'); } }}
+										>i
 											<span className="tooltip" role="tooltip">
 												<strong>Filtered vs Overall</strong><br/>
-												Net of only filtered rows beside full statement net.
+												How much the current filters explain the full statement.
 												<ul>
-													<li><span className="kw-accent">Purpose</span>: Gauge how much of total activity your current slice represents.</li>
-													<li><span className="kw-risk">Large gap</span>: Narrow lens; broaden filters to confirm trend.</li>
-													<li><span className="kw-positive">Nearly equal</span>: Viewing most of dataset already.</li>
-													<li>Adjust date or account type to watch proportion shift.</li>
+													<li><span className="kw-accent">Filtered</span>: Net sum of the rows you are viewing.</li>
+													<li><span className="kw-accent">Overall</span>: Net sum of the entire statement.</li>
+													<li><span className="kw-risk">Big gap</span>: Filters exclude a lot of activity.</li>
+													<li><span className="kw-positive">Close match</span>: Filters cover most activity.</li>
 												</ul>
 											</span>
 										</span>
@@ -2627,16 +2564,25 @@ const dailyNetChart = useMemo(() => {
 									</div>
 									)}
 									{dailyNetChart && (
-									<div className="chart">
-										<span className="chart-info" tabIndex={0} aria-label={filteredTxns.length>0 && filteredTxns.every(t => (t.account_type||'credit_card')==='credit_card') ? 'Daily Net: Bars show daily net charges (negative) and credits (positive); dotted line is cumulative payoff momentum.' : 'Daily Net: Bars show daily net inflow (positive) or outflow (negative); dotted line is cumulative running total.'}>i
+									<div className={"chart" + (activeModebarChart==='daily-net' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('daily-net', e)}>
+										<span
+											className={"chart-info" + (openChartTooltip==='daily-net' ? ' open' : '')}
+											tabIndex={0}
+											role="button"
+											aria-haspopup="dialog"
+											aria-expanded={openChartTooltip==='daily-net'}
+											aria-label={filteredTxns.length>0 && filteredTxns.every(t => (t.account_type||'credit_card')==='credit_card') ? 'Daily Net: Bars show daily net charges (negative) and credits (positive); dotted line is cumulative payoff momentum.' : 'Daily Net: Bars show daily net inflow (positive) or outflow (negative); dotted line is cumulative running total.'}
+											onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('daily-net'); }}
+											onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('daily-net'); } }}
+										>i
 											<span className="tooltip" role="tooltip">
 												<strong>Daily Net</strong><br/>
-												{filteredTxns.length>0 && filteredTxns.every(t => (t.account_type||'credit_card')==='credit_card') ? 'Charges (neg) & credits (pos) per day.' : 'Net inflow (pos) / outflow (neg) each day.'}
+												{filteredTxns.length>0 && filteredTxns.every(t => (t.account_type||'credit_card')==='credit_card') ? 'Daily charges (neg) and credits (pos) for the selected cards.' : 'Daily net inflow (pos) and outflow (neg) for the selected accounts.'}
 												<ul>
-													<li><span className="kw-accent">Bars</span>: Single-day impact.</li>
-													<li><span className="kw-accent">Dotted line</span>: Cumulative trend; slope change = momentum shift.</li>
-													<li><span className="kw-risk">Clusters of large negatives</span> = spending spikes.</li>
-													<li><span className="kw-positive">Flat or rising steadily</span> = stabilizing / positive flow.</li>
+													<li><span className="kw-accent">Bars</span>: Net impact for that day.</li>
+													<li><span className="kw-accent">Dotted line</span>: Running total over time.</li>
+													<li><span className="kw-risk">Deep dips</span>: Large spend or heavy charges.</li>
+													<li><span className="kw-positive">Rising line</span>: Improving cash flow.</li>
 												</ul>
 											</span>
 										</span>
@@ -2661,52 +2607,80 @@ const dailyNetChart = useMemo(() => {
 									</div>
 									)}
 									{accountMixChart && showAdvancedCharts && (
-									<div className="chart">
+									<div className={"chart" + (activeModebarChart==='account-mix' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('account-mix', e)}>
 										{showSankeyFlow && sankeyChart ? (
-											<span className="chart-info" tabIndex={0} aria-label="Flow view: Income allocated to Savings, Spending and any Unallocated remainder; Spending split into top negative outflow categories; percentages show share of source node.">i
+											<span
+												className={"chart-info" + (openChartTooltip==='income-flow' ? ' open' : '')}
+												tabIndex={0}
+												role="button"
+												aria-haspopup="dialog"
+												aria-expanded={openChartTooltip==='income-flow'}
+												aria-label="Flow view: Income allocated to Savings, Spending and any Unallocated remainder; Spending split into top negative outflow categories; percentages show share of source node."
+												onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('income-flow'); }}
+												onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('income-flow'); } }}
+											>i
 												<span className="tooltip" role="tooltip">
-													<strong>Income Allocation Flow</strong><br/>Shows how Income moves into Savings and Spending, then into top expense categories.
+													<strong>Income Allocation Flow</strong><br/>A story of where your money went.
 													<ul>
-														<li><span className="kw-accent">Income</span>: Positive rows categorized Income.</li>
-														<li><span className="kw-accent">Savings</span>: Positive rows categorized Savings.</li>
-														<li><span className="kw-risk">Spending</span>: Negative rows (non Income/Savings).</li>
-														<li><span className="kw-accent">Account Split</span>: With one Credit Card or Checking type selected, Spending splits per account before categories.</li>
-														<li>Unallocated shows if Income exceeds Savings + Spending.</li>
+														<li><span className="kw-accent">Income</span> → <span className="kw-accent">Savings</span> / <span className="kw-risk">Spending</span>.</li>
+														<li><span className="kw-risk">Spending</span> then fans into top categories.</li>
+														<li><span className="kw-accent">Account Split</span>: If one Credit Card or Checking type is selected, Spending splits by account first.</li>
+														<li><span className="kw-neutral">Unallocated</span>: Income not explained by Savings + Spending in the window.</li>
 														<li>Hover % = share of the source node.</li>
 													</ul>
 												</span>
 											</span>
 										) : categoriesApplied ? (
-											<span className="chart-info" tabIndex={0} aria-label="Bar view: Income, Savings, and aggregated Expense (all other categories) using gross positive Income/Savings and absolute negatives for Expense.">i
+											<span
+												className={"chart-info" + (openChartTooltip==='income-bars' ? ' open' : '')}
+												tabIndex={0}
+												role="button"
+												aria-haspopup="dialog"
+												aria-expanded={openChartTooltip==='income-bars'}
+												aria-label="Bar view: Income, Savings, and aggregated Expense (all other categories) using gross positive Income/Savings and absolute negatives for Expense."
+												onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('income-bars'); }}
+												onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('income-bars'); } }}
+											>i
 												<span className="tooltip" role="tooltip">
-													<strong>Income · Savings · Expense</strong><br/>Gross flows (Income & Savings positive; Expense = sum absolute negatives of other categories; transfers ignored).
+													<strong>Income · Savings · Expense</strong><br/>Simple totals before the flow view.
 													<ul>
-														<li><span className="kw-accent">Income</span>: Positive 'Income' rows only.</li>
-														<li><span className="kw-accent">Savings</span>: Positive 'Savings' rows.</li>
-														<li><span className="kw-risk">Expense</span>: Sum of abs(negative) for non Income/Savings categories.</li>
-														<li>Use Flow toggle for allocation breakdown.</li>
+														<li><span className="kw-accent">Income</span>: Positive Income rows.</li>
+														<li><span className="kw-accent">Savings</span>: Positive Savings rows.</li>
+														<li><span className="kw-risk">Expense</span>: Absolute value of negative non Income/Savings rows.</li>
+														<li>Toggle Flow for the full allocation story.</li>
 													</ul>
 												</span>
 											</span>
 										) : (
-											<span className="chart-info" tabIndex={0} aria-label="Account Type Mix: Net inflow / outflow per account type before categorization.">i
+											<span
+												className={"chart-info" + (openChartTooltip==='account-mix' ? ' open' : '')}
+												tabIndex={0}
+												role="button"
+												aria-haspopup="dialog"
+												aria-expanded={openChartTooltip==='account-mix'}
+												aria-label="Account Type Mix: Net inflow / outflow per account type before categorization."
+												onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('account-mix'); }}
+												onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('account-mix'); } }}
+											>i
 												<span className="tooltip" role="tooltip">
-													<strong>Account Type Mix</strong><br/>Net (signed) sums per account type prior to categorization.
+													<strong>Account Type Mix</strong><br/>Net totals by account type before categorization.
 													<ul>
-														<li>Positive = net inflow / credits.</li>
-														<li>Negative = net outflow / charges.</li>
-														<li>Categorize to unlock Income/Savings/Expense & Flow views.</li>
+														<li><span className="kw-positive">Positive</span>: Net inflow / credits.</li>
+														<li><span className="kw-risk">Negative</span>: Net outflow / charges.</li>
+														<li>Categorize to unlock Savings/Expense and Flow views.</li>
 													</ul>
 												</span>
 											</span>
 										)}
 										{/* Sankey toggle integration */}
-										<div className="sankey-toggle-panel">
-											<button type="button" className={"col-toggle-btn" + (showSankeyFlow? ' active':'')} aria-pressed={showSankeyFlow} onClick={()=> setShowSankeyFlow(s=> !s)} title="Toggle Flow (Sankey) view (switch with Income/Savings/Expense bar)">
-												<span className="indicator" /> Flow
-											</button>
-										</div>
-										{showSankeyFlow && sankeyChart ? (
+										{categoriesApplied && (
+											<div className="sankey-toggle-panel">
+												<button type="button" className={"col-toggle-btn" + (showSankeyFlow? ' active':'')} aria-pressed={showSankeyFlow} onClick={()=> setShowSankeyFlow(s=> !s)} title="Toggle Flow (Sankey) view (switch with Income/Savings/Expense bar)">
+													<span className="indicator" /> Flow
+												</button>
+											</div>
+										)}
+										{categoriesApplied && showSankeyFlow && sankeyChart ? (
 											<>
 												<Plot {...sankeyChart} className="plot-inner" useResizeHandler />
 												<div className="chart-toggle-panel" aria-label="Sankey display options">
@@ -2724,16 +2698,27 @@ const dailyNetChart = useMemo(() => {
 									</div>
 									)}
 									{creditChargesChart && showAdvancedCharts && (
-									<div className="chart">
-										<span className="chart-info" tabIndex={0} aria-label="Credit Card Charges vs Payments: Direct statement charges/payments or inferred payments from transfers when card statement absent.">i
+									<div className={"chart" + (activeModebarChart==='credit-charges' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('credit-charges', e)}>
+										<span
+											className={"chart-info" + (openChartTooltip==='credit-charges' ? ' open' : '')}
+											tabIndex={0}
+											role="button"
+											aria-haspopup="dialog"
+											aria-expanded={openChartTooltip==='credit-charges'}
+											aria-label="Credit Card Charges vs Payments: Direct statement charges/payments or inferred payments from transfers when card statement absent."
+											onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('credit-charges'); }}
+											onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('credit-charges'); } }}
+										>i
 											<span className="tooltip" role="tooltip">
 												<strong>Credit Card Charges vs Payments</strong><br/>
-												Shows net charges and payments if credit card transactions present. If not, negative Account Transfer rows mentioning a card are treated as inferred payments (Charges = 0).
+												Are you paying down or carrying?
 												<ul>
-													<li><span className="kw-risk">&lt;80%</span>: Growing balance.</li>
+													<li><span className="kw-accent">Charges</span>: Card purchases (negative).</li>
+													<li><span className="kw-accent">Payments</span>: Payments or transfers to the card.</li>
+													<li><span className="kw-risk">&lt;80%</span>: Balance likely growing.</li>
 													<li><span className="kw-neutral">80–100%</span>: Near break-even.</li>
 													<li><span className="kw-positive">&gt;100%</span>: Paying down.</li>
-													<li>"(Inferred Payments)" title denotes transfer-based estimation.</li>
+													<li>"Inferred Payments" means card statement was not present.</li>
 												</ul>
 											</span>
 										</span>
@@ -2741,6 +2726,89 @@ const dailyNetChart = useMemo(() => {
 									</div>
 									)}
 							</React.Suspense>
+						</section>
+					)}
+					{parseResult && (
+						<section className="filters consolidated advanced-only">
+							<div className="filters-head">
+								{shouldShowReset && (
+									<button className="clear-filters inline head-clear" onClick={()=>{
+										setRawFilter(''); setFilter(''); setActiveAccountTypes([]); setActiveSources([]);
+										// Restore to dataset bounds if available, else clear
+										setDateStart(dataMinDate || '');
+										setDateEnd(dataMaxDate || '');
+										setLiveStatus('Filters reset to defaults.');
+									}}>Reset</button>
+								)}
+								<div
+									className={`ai-status-pill ${aiIndicator.cls}`}
+									title={aiIndicator.detail || (aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined)}
+									aria-live="polite"
+								>
+									{aiIndicator.text}
+								</div>
+							</div>
+								<div className="filters-advanced">
+									<div className="filters-advanced-body">
+										<div className="filters-secondary-row">
+											<div className="type-chips" aria-label="Account type filters">
+												{(parseResult.metrics.account_types || []).map(t => { const active = activeAccountTypes.includes(t); return <button key={t} className={active ? 'chip active' : 'chip'} onClick={() => setActiveAccountTypes(prev => active ? prev.filter(x => x !== t) : [...prev, t])}>{t}</button>; })}
+											</div>
+											{/* Source file toggles (multi-PDF mode) */}
+											{(parseResult as any).sources && (parseResult as any).sources.length > 1 && (
+												<div className="source-chips" aria-label="Source file filters">
+													{(parseResult as any).sources.map((s: any) => {
+														const name = s.fileName;
+														const active = activeSources.includes(name) || activeSources.length===0; // if none selected treat as all active
+														return <button key={name} className={active ? 'chip active' : 'chip'} onClick={() => {
+															setActiveSources(prev => {
+																if(prev.includes(name)) { const next = prev.filter(x=> x!==name); return next; }
+																return [...prev, name];
+														});
+													}} title="Toggle inclusion of this source file in views">{name}</button>;
+												})}
+											</div>
+										)}
+										</div>
+									</div>
+								</div>
+						</section>
+					)}
+					{parseResult && (
+						<section className="table-controls" aria-label="Search and column controls">
+							<div className="table-search">
+								<input ref={filterInputRef} className="filter-text table-search-input" placeholder="Search description" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
+								<div className="date-range compact table-date-range" aria-label="Date range">
+									<label><span className="lbl">Start</span><DatePicker value={dateStart} onChange={setDateStart} ariaLabel="Start date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
+									<label><span className="lbl">End</span><DatePicker value={dateEnd} onChange={setDateEnd} ariaLabel="End date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
+								</div>
+							</div>
+							<div className="table-categorize">
+								<CategorizeCluster
+									onUncategorize={uncategorizeAll}
+									categoriesApplied={categoriesApplied}
+									categorizeLoading={categorizeLoading}
+									isRefiningAI={isRefiningAI}
+									useAI={useAI}
+									onCategorize={() => categorizeTransactions('initial')}
+									onToggleAI={() => { if(useAI){ setUseAI(false); return; } requestEnableAI(); }}
+									justCategorizedFlash={justCategorizedFlash}
+								/>
+							</div>
+							<div className="table-columns" aria-label="Column visibility">
+								{Object.entries(visibleCols).map(([key, val]) => (
+									<button
+										key={key}
+										type="button"
+										className={"col-toggle-btn" + (val ? ' active' : '')}
+										aria-pressed={val}
+										onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
+										title={(val? 'Hide ':'Show ') + key + ' column'}
+									>
+										<span className="indicator" aria-hidden="true" />{key}
+									</button>
+								))}
+							</div>
 						</section>
 					)}
 						{filteredTxns.length > 0 && (

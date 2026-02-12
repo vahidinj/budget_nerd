@@ -61,7 +61,8 @@ export const CategorizeCluster: React.FC<CategorizeClusterProps> = ({
               aria-haspopup="dialog"
               aria-controls="cat-help-pop"
               title="About categorization and AI"
-            >{showHelp ? 'Info ▴' : 'Info ▾'}</button>
+              aria-label="Categorization info"
+            >i</button>
             {
               <PortalPopover anchorRef={helpBtnRef} isOpen={showHelp} className="consistency-popover">
                 <div className="cp-head">Categorize <span className="micro">and AI</span></div>

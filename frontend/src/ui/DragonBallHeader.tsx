@@ -9,7 +9,6 @@ export const DragonBallHeader: React.FC = () => {
         <div className="logo-content">
           <div className="logo-line">
             <span className="brand">Budget Nerd</span>
-            <span className="version-chip" title="App version">v0.1</span>
           </div>
           <span className="tagline">🔒 Secure · Private · Ephemeral</span>
         </div>

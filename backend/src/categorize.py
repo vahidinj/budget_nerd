@@ -182,7 +182,7 @@ Design goals:
 Configuration via environment variables:
   USE_AI_CATEGORIES=1              -> enable feature
   OPENAI_API_KEY=sk-...           -> your OpenAI API key (required if USE_AI_CATEGORIES=1)
-    OPENAI_MODEL=gpt-4o-mini        -> (default) model to use
+    OPENAI_MODEL=gpt-4o             -> (default) model to use
     OPENAI_BATCH_SIZE=20            -> batch size for AI requests (default 20)
 
 Cost: Each categorization uses ~20 tokens. Monitor usage at https://platform.openai.com/usage
@@ -194,7 +194,7 @@ except ImportError:
     openai = None  # type: ignore
 
 _openai_client = None  # lazy
-_openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+_openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
 _openai_batch_size = int(os.getenv("OPENAI_BATCH_SIZE", "20"))
 _openai_cache: dict[str, str] = {}  # desc -> category
 _ai_status_cache: dict[str, object] = {
@@ -409,11 +409,15 @@ def ai_refine_with_info(
         return base_category, None, None, None
 
     try:
-        prompt = f"""Categorize this transaction description into ONE of these categories: {", ".join(CANONICAL_CATEGORIES)}.
-
-Transaction: {description}
-
-Respond with ONLY the category name, nothing else."""
+        prompt = (
+            "You are a strict transaction classifier. "
+            "Pick the BEST category from the allowed list. "
+            "If the base category is wrong, replace it. "
+            "Respond with ONLY the category name.\n\n"
+            f"Allowed categories: {', '.join(CANONICAL_CATEGORIES)}\n"
+            f"Base category (heuristic): {base_category}\n"
+            f"Transaction: {description}"
+        )
 
         response = client.chat.completions.create(
             model=_openai_model,
@@ -485,12 +489,13 @@ def _ai_refine_batch(
             continue
         # Build prompt with stable ordering
         prompt_lines = [
+            "You are a strict transaction classifier.",
             "Return ONLY a JSON array of category strings matching the inputs in order.",
             f"Allowed categories: {allowed}",
-            "Inputs:",
+            "Inputs (description | base category):",
         ]
-        for i, (orig_i, desc, _base) in enumerate(chunk, start=1):
-            prompt_lines.append(f"{i}. {desc}")
+        for i, (orig_i, desc, base) in enumerate(chunk, start=1):
+            prompt_lines.append(f"{i}. {desc} | base: {base}")
         prompt = "\n".join(prompt_lines)
 
         try:
@@ -651,7 +656,13 @@ def categorize_records_with_overrides(
         for i, meta in enumerate(metas):
             if meta.get("final_category") == "" or meta.get("skipped"):
                 continue
-            base = meta.get("base_category") or meta.get("final_category") or ""
+            source = meta.get("source")
+            base_cat = meta.get("base_category")
+            if not (
+                source == "fallback" or (source == "regex" and base_cat == "Recreation")
+            ):
+                continue
+            base = base_cat or meta.get("final_category") or ""
             if not base:
                 continue
             idxs.append(i)

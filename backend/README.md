@@ -19,14 +19,14 @@ uvicorn src.api:app --reload
 pip install openai
 export USE_AI_CATEGORIES=1
 export OPENAI_API_KEY=sk-your_key_here
-export OPENAI_MODEL=gpt-4o-mini
+export OPENAI_MODEL=gpt-4o
 ```
 Only transaction descriptions are sent to OpenAI when enabled; PDFs and full statement text never leave your system.
 
 ## Key Environment Variables
 - `USE_AI_CATEGORIES` (unset by default)
 - `OPENAI_API_KEY` (required if AI enabled)
-- `OPENAI_MODEL` (default: `gpt-4o-mini`)
+- `OPENAI_MODEL` (default: `gpt-4o`)
 - `OPENAI_BATCH_SIZE` (default: `20`)
 - `CATEGORY_RULES_FILE` / `CUSTOM_CATEGORY_RULES` for regex overrides
 - `ADMIN_TOKEN` (required if `REQUIRE_ADMIN=1`)
