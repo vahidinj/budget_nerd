@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="owlBody" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#63d1ff" />
+      <stop offset="100%" stop-color="#1b7fc9" />
+    </linearGradient>
+    <linearGradient id="owlFace" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f7e3b6" />
+      <stop offset="100%" stop-color="#e3c28f" />
+    </linearGradient>
+    <linearGradient id="owlBeak" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#ffd27f" />
+      <stop offset="100%" stop-color="#ff9c45" />
+    </linearGradient>
+  </defs>
+  <g stroke="#0a121c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="30" r="18" fill="url(#owlBody)" />
+    <ellipse cx="32" cy="44" rx="18" ry="15" fill="url(#owlBody)" />
+
+    <path d="M16 16l-6 9 12-3z" fill="url(#owlBody)" />
+    <path d="M48 16l6 9-12-3z" fill="url(#owlBody)" />
+
+    <circle cx="23.5" cy="30" r="10.5" fill="url(#owlFace)" />
+    <circle cx="40.5" cy="30" r="10.5" fill="url(#owlFace)" />
+
+    <circle cx="23.5" cy="30" r="6.6" fill="#ffffff" />
+    <circle cx="40.5" cy="30" r="6.6" fill="#ffffff" />
+    <circle cx="23.5" cy="31" r="2.5" fill="#1b1b1b" />
+    <circle cx="40.5" cy="31" r="2.5" fill="#1b1b1b" />
+
+    <path d="M28 35l4 7 4-7z" fill="url(#owlBeak)" />
+
+    <rect x="15" y="24" width="17" height="12" rx="4" fill="none" stroke-width="2" />
+    <rect x="32" y="24" width="17" height="12" rx="4" fill="none" stroke-width="2" />
+  </g>
+</svg>
