@@ -3,7 +3,7 @@
 
 - **Never commit secrets, credentials, or user data to this repo.**
 - All sensitive config (API keys, DB URIs, etc.) must be set via environment variables or a cloud secret manager (e.g., AWS Secrets Manager).
-- User-uploaded data is processed in memory only and not persisted unless a future feature enables it (see main README privacy section).
+- User-uploaded data is processed in memory only and not persisted unless a future feature enables it (see docs/privacy.md).
 - For AWS deployment, use Elastic Beanstalk (Python environment). Set secrets in the Elastic Beanstalk console or connect to AWS Secrets Manager.
 
 ## Local Run (FastAPI)
@@ -32,4 +32,4 @@ Only transaction descriptions and the account type (checking, savings, credit ca
 - `ADMIN_TOKEN` (required if `REQUIRE_ADMIN=1`)
 - `REQUIRE_ADMIN` (default: `1`)
 
-See the main project README for full security, privacy, and deployment details.
+See the main project README and docs/privacy.md for full security, privacy, and deployment details.

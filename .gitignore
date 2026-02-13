@@ -20,6 +20,13 @@ dist/
 .ruff_cache/
 .cache/
 
+# Local data/output
+data/
+uploads/
+exports/
+logs/
+tmp/
+
 # Docker
 *.log
 docker-compose.override.yml
@@ -53,6 +60,7 @@ docker-compose.override.yml
 # Secrets and credentials
 .env
 .env.*
+*.env
 secrets.*
 *.pem
 *.key
@@ -60,6 +68,10 @@ secrets.*
 *.pfx
 credentials.json
 credentials-*.json
+
+# Deployment bundles
+budget_app_backend.zip
+backend/budget_app_backend.zip
 
 # Azure local state
 .azure/
