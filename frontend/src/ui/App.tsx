@@ -215,7 +215,7 @@ export const App: React.FC = () => {
 	const [hoverDate, setHoverDate] = useState<string | null>(null);
 	// Preferences & auxiliary modals (light theme removed per request)
 	const [dateFormat, setDateFormat] = useState<'mdy'|'dmy'>('mdy');
-	const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+	const [infoModalOpen, setInfoModalOpen] = useState(false);
 	const [contactName, setContactName] = useState('');
 	const [contactEmail, setContactEmail] = useState('');
 	const [contactMessage, setContactMessage] = useState('');
@@ -230,10 +230,9 @@ export const App: React.FC = () => {
 	} | null>(null);
 	const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 	const [dragAnnounce, setDragAnnounce] = useState('');
-	const [tourOpen, setTourOpen] = useState(false);
-	// Cover: instructional accordion open states (default first open)
-	const [openStep, setOpenStep] = useState<{ upload: boolean; filter: boolean; analyze: boolean; export: boolean }>({ upload: true, filter: false, analyze: false, export: false });
-	const [showOnboarding, setShowOnboarding] = useState(false);
+	// Cover: minimalist 3-step front stage
+	const [frontStage, setFrontStage] = useState<1 | 2 | 3>(1);
+	const [showFrontDetails, setShowFrontDetails] = useState(false);
 	// Date range filter (inclusive). Empty string means no bound.
 	const [dateStart, setDateStart] = useState('');
 	const [dateEnd, setDateEnd] = useState('');
@@ -241,7 +240,6 @@ export const App: React.FC = () => {
 	const [dataMinDate, setDataMinDate] = useState<string>('');
 	const [dataMaxDate, setDataMaxDate] = useState<string>('');
 	// UI declutter toggles
-	const [areMoreActionsOpen, setAreMoreActionsOpen] = useState(false);
 	const [showSettings, setShowSettings] = useState(false); // advanced settings panel
 	const [showInfoPanel, setShowInfoPanel] = useState(false); // info & utilities panel
 	const [areAllFeaturesShown, setAreAllFeaturesShown] = useState(false);
@@ -507,8 +505,6 @@ export const App: React.FC = () => {
 		try { (document.querySelector('.upload-btn input') as HTMLInputElement)?.focus(); } catch {/* ignore */}
 	}, [recentFiles, loadDemoSample]);
 
-	// Phase 3: defer framer-motion until first meaningful interaction for lighter initial bundle
-	const [motionLib, setMotionLib] = useState<any>(null);
 	// Ref for fancy Upload button tilt effect
 	const uploadBtnRef = useRef<HTMLButtonElement | null>(null);
 	const onUploadBtnMove = useCallback((e: React.MouseEvent) => {
@@ -524,39 +520,6 @@ export const App: React.FC = () => {
 		el.style.removeProperty('--mx');
 		el.style.removeProperty('--my');
 	}, []);
-	useEffect(() => {
-		let loaded = false;
-		const load = () => {
-			if (loaded) return; loaded = true;
-			import('framer-motion').then(mod => setMotionLib(mod)).catch(()=>{/* ignore */});
-		};
-		const first = (e: Event) => { load(); window.removeEventListener('pointerdown', first); window.removeEventListener('keydown', first); };
-		window.addEventListener('pointerdown', first, { passive: true });
-		window.addEventListener('keydown', first);
-		// Safety idle fallback if no interaction within 3s
-		const idleTimer = setTimeout(load, 3000);
-		return () => { window.removeEventListener('pointerdown', first); window.removeEventListener('keydown', first); clearTimeout(idleTimer); };
-	}, []);
-
-	// Helpers to conditionally animate if motion loaded
-	const MotionPresence: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-		const Comp: any = motionLib?.AnimatePresence || React.Fragment;
-		return <Comp>{children}</Comp>;
-	};
-	const MotionSection: React.FC<React.HTMLAttributes<HTMLElement>> = ({ children, className }) => {
-		const M: any = motionLib?.motion?.section;
-		if (M) return <M className={className} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-			{children}
-		</M>;
-		return <section className={className}>{children}</section>;
-	};
-	const MotionDiv: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ children, className, style }) => {
-		const M: any = motionLib?.motion?.div;
-		if (M) return <M className={className} style={style} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-			{children}
-		</M>;
-		return <div className={className} style={style}>{children}</div>;
-	};
 
 	const parseStatementFile = useCallback(async (file: File) => {
 		setLoading(true); setError(null); setLiveStatus('Uploading…');
@@ -928,7 +891,7 @@ const dailyNetChart = useMemo(() => {
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b, '');
 		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.accent, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
@@ -2018,313 +1981,204 @@ const dailyNetChart = useMemo(() => {
 				<main>
 					{/* Cover section */}
 					{!parseResult && !loading && (
-						<section className={"cover" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} aria-labelledby="cover-title" aria-describedby="cover-desc">
-							<h1 id="cover-title" className="cover-global-title">Turn Your Bank Statement Into Clear Insights</h1>
-							{/* Tagline moved lower beside upload for tighter onboarding focus */}
-							<div className="cover-grid divided">
-								<div className="cover-left">
-									<h2 className="cover-left-title">Upload Your Statement</h2>
-								{/* capability & trust sections moved to right column */}
-									{/* Tagline now lives here (replacing prior privacy pill) */}
-									<p id="cover-desc" className="tagline global-tagline moved" role="note">Upload a bank or credit card statement PDF and turn it into instant clarity: cash flow, categories, savings, and card activity. Files move over HTTPS, parse in-memory, and aren’t stored by default. If AI refinement is enabled, <strong>only sanitized transaction descriptions</strong> are used — PDFs, account numbers, and balances never leave the server. Plus, you can convert statement PDFs straight into Excel.</p>
-									<div className="cta-row">
-										<button ref={uploadBtnRef} className="primary-cta primary-cta--ultra" onClick={()=>fileInputRef.current?.click()} aria-describedby="cover-desc" onMouseMove={onUploadBtnMove} onMouseLeave={onUploadBtnLeave}>
-											<DragonOrbIcon size={22} className="orb-icon" />
-											<span className="kw">Upload Bank Statement PDF</span>
-										</button>
-										<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try Sample</span></button>
-										<input ref={fileInputRef} type="file" aria-hidden="true" accept="application/pdf" multiple style={{display:'none'}} onChange={onFileInputChange} />
-									</div>
-									<div className="cta-note" aria-hidden="true">See cash flow, categories, and card activity in seconds.</div>
-									<div className="drop-hint" aria-hidden="true">OR <span className="kw">DROP A BANK STATEMENT PDF</span> HERE</div>
-									<div className="supported-note" role="note" aria-label="Supported statement types">Supports: Checking · Savings · Credit Cards <span className="muted">(Other formats may partially parse)</span></div>
-											{/* Removed guidelines line per request; tips still accessible via separate control if needed */}
-											<div className="instruction-compact">
-												<button
-													className={"dropdown-btn neutral wide" + (showOnboarding ? " open" : "")}
-													aria-expanded={showOnboarding}
-													aria-controls="onboarding-steps"
-													onClick={() => setShowOnboarding(v => !v)}
-												>
-													{showOnboarding ? 'Hide Steps' : 'Show Steps'}
-												</button>
-												{showOnboarding && (
-													<div id="onboarding-steps" className="instruction-accordion" role="region" aria-label="How it works">
-														<div className="ia-item">
-															<button
-																className={"dropdown-btn neutral wide" + (openStep.upload ? " open" : "")}
-																aria-expanded={openStep.upload}
-																aria-controls="ia-upload"
-																onClick={() => setOpenStep(s => ({ ...s, upload: !s.upload }))}
-															>
-																<span className="step-index">1</span> Upload
-															</button>
-															{openStep.upload && (
-																<div id="ia-upload" className="ia-body">
-																	<p>Drag and drop PDF(s) or click <em><span className="kw">Upload PDF(s)</span></em>. Files are uploaded to the backend over HTTPS and parsed in-memory on the server; nothing is persisted by default.</p>
-																	<ul className="tips">
-																		<li>Supports Checking, Savings, and Credit Card statements; others may partially parse.</li>
-																		<li>Upload single or multiple files. Large files may parse slower.</li>
-																		<li>Just exploring? Use <em><span className="kw">Try Sample</span></em> to view the demo.</li>
-																	</ul>
-																</div>
-															)}
-														</div>
-														<div className="ia-item">
-															<button
-																className={"dropdown-btn neutral wide" + (openStep.filter ? " open" : "")}
-																aria-expanded={openStep.filter}
-																aria-controls="ia-filter"
-																onClick={() => setOpenStep(s => ({ ...s, filter: !s.filter }))}
-															>
-																<span className="step-index">2</span> Filter
-															</button>
-															{openStep.filter && (
-																<div id="ia-filter" className="ia-body">
-																	<p>Refine results using the <span className="kw">search box</span>, <span className="kw">date range</span>, <span className="kw">account types</span>, and <span className="kw">sources</span> (when multiple PDFs are loaded).</p>
-																	<ul className="tips">
-																		<li>Search supports <code>cat:&lt;name&gt;</code> (e.g., <code>cat:food</code>) and plain-text matches in descriptions.</li>
-																		<li>Date pickers default to dataset bounds — use <em><span className="kw">Reset</span></em> to revert filters.</li>
-																		<li>Tap the search box to focus, then type to filter.</li>
-																	</ul>
-																</div>
-															)}
-														</div>
-														<div className="ia-item">
-															<button
-																className={"dropdown-btn neutral wide" + (openStep.analyze ? " open" : "")}
-																aria-expanded={openStep.analyze}
-																aria-controls="ia-analyze"
-																onClick={() => setOpenStep(s => ({ ...s, analyze: !s.analyze }))}
-															>
-																<span className="step-index">3</span> Analyze
-															</button>
-															{openStep.analyze && (
-																<div id="ia-analyze" className="ia-body">
-																	<p>Click <em><span className="kw">Categorize</span></em> to label transactions. Charts update with your filters: Daily Net, Account Mix, Income·Savings·Expense, Credit Charges vs Payments, and the Income Allocation Sankey.</p>
-																	<ul className="tips">
-																		<li>Enable <span className="kw">AI</span> (opt-in) to refine categories on the backend. Transfers are excluded from analytics.</li>
-																		<li><span className="kw">Hover</span> charts for unified tooltips; select a range on Daily Net to focus dates.</li>
-																		<li>Toggle <span className="kw">Flow</span> to enable the Sankey; expand <span className="kw">Savings</span> to split by account.</li>
-																		<li><strong>Inline review:</strong> Each row includes a category dropdown for quick reclassification; user overrides show in <span className="kw">theme yellow</span> and a mini-undo is available.</li>
-																	</ul>
-																</div>
-															)}
-														</div>
-														<div className="ia-item">
-															<button
-																className={"dropdown-btn neutral wide" + (openStep.export ? " open" : "")}
-																aria-expanded={openStep.export}
-																aria-controls="ia-export"
-																onClick={() => setOpenStep(s => ({ ...s, export: !s.export }))}
-															>
-																<span className="step-index">4</span> Export
-															</button>
-															{openStep.export && (
-																<div id="ia-export" className="ia-body">
-																	<p>Export the filtered table to <span className="kw">CSV</span> or <span className="kw">Excel</span>, or copy a <span className="kw">Markdown</span> snapshot. Sort columns and toggle fields before export.</p>
-																	<ul className="tips">
-																		<li><span className="kw">CSV</span> is ideal for quick imports; <span className="kw">Excel</span> includes a Summary sheet.</li>
-																		<li><span className="kw">Markdown</span> is convenient for sharing—top 500 rows included.</li>
-																	</ul>
-																</div>
-															)}
-														</div>
-													</div>
-												)}
-											</div>
-										
-										{/* Removed dedicated last session bubble */}
-									{recentFiles.length > 0 && (
-										<div className="recent-card" aria-label="Recent sessions">
-											<div className="recent-card-head">
-												<span className="recent-title">Recent</span>
-												<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume last session">Resume</button>
-												<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear all data">
-													<svg className="clear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-														<path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-														<path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-														<path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-														<path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-														<path d="M9 3h6l-1 3H10L9 3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-													</svg>
-													<span className="clear-label">Clear</span>
-												</button>
-											</div>
-											<ul className="recent-list">
-												{recentFiles.map(r => (
-													<li key={r.name} className="recent-list-item">
-														<span className="recent-filename">{r.name}</span>
-														<span className="recent-meta">{r.txns} txns · {formatRelativeTime(r.ts)}</span>
-													</li>
-												))}
-											</ul>
-										</div>
-									)}
-									<div className="primary-actions">
-										<button className="tour-btn" onClick={()=> setTourOpen(true)}>Tour</button>
-										<button className="settings-btn" aria-expanded={showSettings} onClick={()=> setShowSettings(s=>{ const next=!s; if(next) setShowInfoPanel(false); return next; })} title="Settings">⚙ Settings</button>
-										<button
-											className="settings-btn filters-toggle"
-											aria-expanded={showInfoPanel}
-											aria-haspopup="true"
-											aria-controls="help-tools-panel"
-											onClick={()=> setShowInfoPanel(s=>{ const next=!s; if(next) setShowSettings(false); return next; })}
-											title="Help & tools"
-										>
-											{showInfoPanel ? 'Help & Tools ▴' : 'Help & Tools ▾'}
-										</button>
-									</div>
-									{showSettings && (
-										<div className="settings-panel" aria-label="Advanced settings">
-											<div className="setting-row">
-												<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal contrast':'High contrast'}</button>
-												<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
-											</div>
-											{/* Utilities moved to Info & Tools panel */}
-										</div>
-									)}
-									{showInfoPanel && (
-										<div id="help-tools-panel" className="settings-panel" aria-label="Help & tools">
-											<div className="setting-row">
-												<button className="tour-btn" onClick={()=> setTourOpen(true)}>Tour</button>
-												{/* Clear all moved to Recent card */}
-											</div>
-											<div className="help-card" aria-label="Help overview">
-												<ul className="help-hints">
-													<li>Use filters to focus a slice, then compare with Filtered vs Overall.</li>
-													<li>Daily Net supports drag-select to zoom a date range.</li>
-													<li>Transfers are excluded from allocation and savings metrics.</li>
-												</ul>
-											</div>
-										
-										</div>
-									)}
-										{areMoreActionsOpen && (
-										<div className="more-actions" aria-label="Additional actions">
-											<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal':'High Contrast'}</button>
-											<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
-											<button className="clear-all-btn" onClick={clearAllLocal}>Clear All Data</button>
-											{/* About toggle removed; section always visible */}
-										</div>
-									)}
-								</div>
-								<div className="cover-right">
-											<h2 className="benefits-heading">Key Features</h2>
-											<div className="value-grid merged" aria-label="Key capabilities">
-												<div className="val-item"><strong>Server-Side Parsing</strong><span>PDFs uploaded over HTTPS and parsed in-memory on backend; results returned to browser and not persisted by default.</span></div>
-												<div className="val-item"><strong>Fast Processing</strong><span>Hundreds of transactions parsed quickly; supports checking, savings, and credit card statements.</span></div>
-												<div className="val-item"><strong>Rule-Based Categories</strong><span>Pattern-based categorization with optional AI refinement (opt-in). Inline editing available for all categories with visual override indicators.</span></div>
-												<div className="val-item"><strong>Visual Analytics</strong><span>Interactive charts showing spending trends, account distributions, and cash flow over time.</span></div>
-												<div className="val-item"><strong>Export Options</strong><span>Download filtered data as CSV, Excel, or Markdown format for further analysis.</span></div>
-											</div>
-											<div className="cover-sub-sections merged-panels">
-												<div className="use-cases" aria-label="Common use cases">
-													<h2>Use Cases</h2>
-													<ul>
-														<li>Budgeting and month-end reconciliation</li>
-														<li>Tracking card payoff and surplus</li>
-														<li>Spotting outliers or fee spikes</li>
-														<li>Convert statement PDFs into Excel</li>
-														<li>Cleaning up data before import</li>
-														<li>Comparing filtered vs. full statement</li>
-													</ul>
-												</div>
-												<div className="trust-badges" aria-label="Trust & guarantees">
-													<h2>Data Handling</h2>
-													<ul className="trust-condensed" role="list">
-														<li>PDFs uploaded via HTTPS and parsed in-memory on backend server</li>
-														<li>Parsed data returned to browser; not persisted by default</li>
-														<li>AI refinement (when enabled) sends only transaction descriptions to OpenAI API—PDFs and sensitive data never transmitted</li>
-														<li>Open source—review code and implementation details on GitHub</li>
-														<li>Clear all cached data with one-click purge button</li>
-													</ul>
-												</div>
-											</div>
-											{/* Removed original benefit cards (Immediate insight, Cleaner data, Flexible export) as redundant with capability tiles */}
-											{/*! Sample preview (Phase 3) */}
-											<MotionDiv className="sample-preview" aria-label="Preview of charts you'll see after parsing a PDF">
-												<div className="sp-head">Sample Preview</div>
-												<div className="sp-body" style={{ justifyContent: 'space-between', display: 'flex', alignItems: 'center' }}>
-													<svg className="sp-spark" viewBox="0 0 120 32" role="img" aria-label="Demo net flow trend line">
-														<defs>
-															<linearGradient id="spGrad" x1="0" x2="0" y1="0" y2="1">
-																<stop offset="0%" stopColor="var(--accent)" stopOpacity="0.9" />
-																<stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-															</linearGradient>
-															<radialGradient id="pulseGrad" cx="50%" cy="50%" r="50%">
-																<stop offset="0%" stopColor="var(--chart-savings-light)" stopOpacity="1" />
-																<stop offset="38%" stopColor="var(--chart-savings)" stopOpacity="0.72" />
-																<stop offset="72%" stopColor="color-mix(in srgb, var(--chart-savings) 60%, var(--chart-accent) 40%)" stopOpacity="0.35" />
-																<stop offset="100%" stopColor="color-mix(in srgb, var(--chart-savings) 30%, var(--chart-muted) 70%)" stopOpacity="0" />
-															</radialGradient>
-														</defs>
-														<path id="spLine" d="M0 18 L10 16 L20 20 L30 12 L40 14 L50 8 L60 10 L70 6 L80 9 L90 5 L100 7 L110 4 L120 6" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
-														<path d="M0 32 L0 18 L10 16 L20 20 L30 12 L40 14 L50 8 L60 10 L70 6 L80 9 L90 5 L100 7 L110 4 L120 6 L120 32 Z" fill="url(#spGrad)" />
-														{/* Animated pulse traveling along curve */}
-														<circle r="5" className="sp-pulse" fill="url(#pulseGrad)" style={{ mixBlendMode: 'screen' }}>
-															<animateMotion dur="3.2s" repeatCount="indefinite" keyTimes="0;1" keySplines="0.4 0 0.2 1" calcMode="spline" path="M0 18 L10 16 L20 20 L30 12 L40 14 L50 8 L60 10 L70 6 L80 9 L90 5 L100 7 L110 4 L120 6" />
-														</circle>
-													</svg>
-													<div className="sp-metrics">
-														<div><span className="lbl">Net Flow</span><strong>+$4,210</strong></div>
-														<div><span className="lbl">Payoff</span><strong>102%</strong></div>
-														<div><span className="lbl">Quality</span><strong>Excellent</strong></div>
-														<div><span className="lbl">Credit Card</span><strong>Active</strong></div>
-													</div>
-													<button className="primary-cta sp-try-btn" type="button" onClick={loadDemoSample} style={{ marginLeft: '1.2em', marginTop: '.2em', alignSelf: 'flex-start' }}>Try Sample</button>
-												</div>
-												<div className="sp-foot">
-													Upload your PDF to replace this demo snapshot with live interactive charts.
-												</div>
-											</MotionDiv>
-									{/* Removed legacy info-list (supported/guidelines) now shown inline near upload */}
-									{/* Developer inline link removed per request */}
-									{/* Moved stack badges & repo link to anchored bottom-right container */}
-									<div className="dev-card" aria-labelledby="dev-heading">
-										<h2 id="dev-heading">About the Developer</h2>
-											<p><strong>Vahidin Jupic</strong> — Data Scientist & U.S. Marine Corps veteran with 10 years Department of Defense experience delivering secure, high‑integrity analytics.</p>
-											<ul style={{margin:'0 0 .4rem 1rem', padding:0, listStyle:'disc', fontSize:'.58rem', lineHeight:1.35}}>
-												<li>Expertise: data extraction, NLP patterning, anomaly detection, financial normalization.</li>
-												<li>Focus: privacy‑first engineering & transparent, reviewable categorization.</li>
-												<li>Built tools supporting mission decision workflows & secure data enclaves.</li>
-											</ul>
-											<p className="dev-links">
-											<a href="https://github.com/vahidinj/budget_nerd" target="_blank" rel="noopener noreferrer" className="dev-link" aria-label="Open project repository in new tab">Project Repo ↗</a>
+							<section className={"cover cover-minimal" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} aria-labelledby="cover-title" aria-describedby="cover-desc">
+								<div className="cover-hero">
+									<div className="hero-copy">
+										<div className="hero-eyebrow">Budget Nerd</div>
+										<h1 id="cover-title" className="cover-global-title">Know where your money goes.</h1>
+										<p id="cover-desc" className="hero-sub" role="note">
+											Turn your statement PDF into clean, auto-tagged insights in minutes.
+											<span className="hero-subline">No setup, no clutter.</span>
 										</p>
+										<div className="hero-actions">
+											<button className="primary-cta" onClick={() => setFrontStage(3)} aria-label="Start with upload">Start with upload</button>
+											<button className="secondary-cta" onClick={loadDemoSample}>Try sample</button>
+										</div>
 									</div>
-									{isDropActive && (
-										<div className="drag-overlay" aria-hidden="true">
-											<div className="drag-overlay-inner">Drop to upload and parse on the secure backend</div>
+									<div className="hero-stepper" role="tablist" aria-label="Intro steps">
+										<button className={"step-tab" + (frontStage === 1 ? " active" : "")} role="tab" aria-selected={frontStage === 1} onClick={() => setFrontStage(1)}>
+											<span className="step-num">1</span> What it does
+										</button>
+										<button className={"step-tab" + (frontStage === 2 ? " active" : "")} role="tab" aria-selected={frontStage === 2} onClick={() => setFrontStage(2)}>
+											<span className="step-num">2</span> Privacy and trust
+										</button>
+										<button className={"step-tab" + (frontStage === 3 ? " active" : "")} role="tab" aria-selected={frontStage === 3} onClick={() => setFrontStage(3)}>
+											<span className="step-num">3</span> Upload
+										</button>
+									</div>
+								</div>
+								<div className="cover-stage" role="tabpanel" aria-live="polite">
+									{frontStage === 1 && (
+										<div className="stage-panel">
+											<h2 className="stage-title">What it does</h2>
+											<p className="stage-sub">Get clarity from a messy statement in minutes.</p>
+											<div className="stage-grid">
+												<div className="stage-card">
+													<span className="card-title">Auto-tag</span>
+													<p>Transactions are auto-tagged so you can review and refine fast.</p>
+												</div>
+												<div className="stage-card">
+													<span className="card-title">Clear summaries</span>
+													<p>See cash flow, categories, and account mix at a glance.</p>
+												</div>
+												<div className="stage-card">
+													<span className="card-title">Ready to export</span>
+													<p>Download CSV or Excel when you are ready to share or archive.</p>
+												</div>
+											</div>
+											<div className="stage-nav">
+												<button className="ghost-cta" disabled>Back</button>
+												<button className="primary-cta" onClick={() => setFrontStage(2)}>Next</button>
+											</div>
+										</div>
+									)}
+									{frontStage === 2 && (
+										<div className="stage-panel">
+											<h2 className="stage-title">Privacy and trust</h2>
+											<p className="stage-sub">Your data stays yours. You control what is shared.</p>
+											<div className="stage-grid">
+												<div className="stage-card">
+													<span className="card-title">PDFs stay on your system</span>
+													<p>Uploads are parsed in-memory and not persisted by default.</p>
+												</div>
+												<div className="stage-card">
+													<span className="card-title">AI refinement is opt-in</span>
+													<p>Only sanitized transaction descriptions are shared. PDFs, account numbers, and balances do not leave the server.</p>
+												</div>
+												<div className="stage-card">
+													<span className="card-title">Clear anytime</span>
+													<p>Review code, export data, and purge cached results with one click.</p>
+												</div>
+											</div>
+												<div className="detail-actions">
+													<button className="link-cta" onClick={() => setShowFrontDetails(v => !v)} aria-expanded={showFrontDetails}>
+														{showFrontDetails ? 'Hide details' : 'Details'}
+													</button>
+													<a className="link-cta" href="/privacy-trust.html">Privacy &amp; Trust page</a>
+												</div>
+											{showFrontDetails && (
+												<ul className="detail-list" aria-label="Privacy details">
+													<li>Parsed results are returned to your browser and not persisted by default.</li>
+													<li>You can remove local data at any time with Clear in Recent.</li>
+													<li>AI refinement is optional and can be toggled off at any time.</li>
+												</ul>
+											)}
+											<div className="stage-nav">
+												<button className="ghost-cta" onClick={() => setFrontStage(1)}>Back</button>
+												<button className="primary-cta" onClick={() => setFrontStage(3)}>Next</button>
+											</div>
+										</div>
+									)}
+									{frontStage === 3 && (
+										<div className="stage-panel">
+											<h2 className="stage-title">Upload your statement</h2>
+											<p className="stage-sub">Start with a PDF or explore the sample dataset.</p>
+											<div className="cta-row">
+												<button ref={uploadBtnRef} className="primary-cta primary-cta--ultra" onClick={()=>fileInputRef.current?.click()} aria-describedby="cover-desc" onMouseMove={onUploadBtnMove} onMouseLeave={onUploadBtnLeave}>
+													<DragonOrbIcon size={22} className="orb-icon" />
+													<span className="kw">Upload Statement PDF</span>
+												</button>
+												<button className="secondary-cta" onClick={loadDemoSample}><span className="kw">Try Sample</span></button>
+												<input ref={fileInputRef} type="file" aria-hidden="true" accept="application/pdf" multiple style={{display:'none'}} onChange={onFileInputChange} />
+											</div>
+											<div className="cta-note" aria-hidden="true">See cash flow, categories, and card activity in seconds.</div>
+											<div className="drop-hint" aria-hidden="true">OR <span className="kw">DROP A STATEMENT PDF</span> HERE</div>
+											<div className="supported-note" role="note" aria-label="Supported statement types">Supports: Checking - Savings - Credit Cards <span className="muted">(Other formats may partially parse)</span></div>
+											<div className="front-utility-row">
+												<button className="settings-btn" aria-expanded={showSettings} onClick={()=> setShowSettings(s=>{ const next=!s; if(next) setShowInfoPanel(false); return next; })} title="Settings">Settings</button>
+												<button
+													className="settings-btn filters-toggle"
+													aria-expanded={showInfoPanel}
+													aria-haspopup="true"
+													aria-controls="help-tools-panel"
+													onClick={()=> setShowInfoPanel(s=>{ const next=!s; if(next) setShowSettings(false); return next; })}
+													title="Help & tools"
+												>
+														Help & Tools
+												</button>
+											</div>
+											{showSettings && (
+												<div className="settings-panel" aria-label="Advanced settings">
+													<div className="setting-row">
+														<button className="contrast-btn" onClick={()=> setIsHighContrast(h=>!h)} aria-pressed={isHighContrast}>{isHighContrast? 'Normal contrast':'High contrast'}</button>
+														<button className="date-btn" onClick={()=> setDateFormat(f=> f==='mdy'?'dmy':'mdy')} aria-pressed={dateFormat==='dmy'}>{dateFormat==='mdy' ? 'Date M/D/Y' : 'Date D/M/Y'}</button>
+													</div>
+												</div>
+											)}
+											{showInfoPanel && (
+												<div id="help-tools-panel" className="settings-panel" aria-label="Help & tools">
+													<div className="help-card" aria-label="Help overview">
+														<ul className="help-hints">
+															<li>Use filters to focus a slice, then compare with Filtered vs Overall.</li>
+															<li>Daily Net supports drag-select to zoom a date range.</li>
+															<li>Transfers are excluded from allocation and savings metrics.</li>
+														</ul>
+													</div>
+												</div>
+											)}
+											{recentFiles.length > 0 && (
+												<div className="recent-card" aria-label="Recent sessions">
+													<div className="recent-card-head">
+														<span className="recent-title">Recent</span>
+														<button type="button" className="resume-btn" onClick={resumeLastSession} aria-label="Resume last session">Resume</button>
+														<button type="button" className="clear-all-btn small" onClick={clearAllLocal} aria-label="Clear all data">
+															<svg className="clear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+																<path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+																<path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+																<path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+																<path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+																<path d="M9 3h6l-1 3H10L9 3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+															</svg>
+															<span className="clear-label">Clear</span>
+														</button>
+													</div>
+													<ul className="recent-list">
+														{recentFiles.map(r => (
+															<li key={r.name} className="recent-list-item">
+																<span className="recent-filename">{r.name}</span>
+																<span className="recent-meta">{r.txns} txns · {formatRelativeTime(r.ts)}</span>
+															</li>
+														))}
+													</ul>
+												</div>
+											)}
+											<div className="stage-nav">
+												<button className="ghost-cta" onClick={() => setFrontStage(2)}>Back</button>
+											</div>
 										</div>
 									)}
 								</div>
-							</div>
-							
-						</section>
+								{isDropActive && (
+									<div className="drag-overlay" aria-hidden="true">
+										<div className="drag-overlay-inner">Drop to upload and parse on the secure backend</div>
+									</div>
+								)}
+							</section>
 					)}
 					<a href="#charts-start" className="skip-link">Skip to charts</a>
 					<a href="#table-start" className="skip-link">Skip to table</a>
 
-					<section className={"upload-panel" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-						{parseResult && (
-							<label className="upload-btn"><DragonOrbIcon size={16} className="orb-icon" /> Upload PDF(s)
-								<input ref={fileInputRef} type="file" accept="application/pdf" multiple onChange={onFileInputChange} />
-							</label>
-						)}
-						{parseResult && !loading && (
-							<button className="reset-btn" onClick={resetApp} title="Clear parsed data and return to cover">↩︎ Back</button>
-						)}
-							{backendStatus === 'down' && <div className="error">Backend offline (start API on :8000)</div>}
-							{uploadWarnings.length > 0 && (
-								<div className="upload-warning" role="alert" aria-live="polite">
-									<ul>{uploadWarnings.map((w,i)=><li key={i}>{w}</li>)}</ul>
-									<button type="button" className="dismiss-upload-warning" aria-label="Dismiss upload warnings" onClick={()=> setUploadWarnings([])}>×</button>
-								</div>
+					{(parseResult || loading || error || uploadWarnings.length > 0 || backendStatus === 'down') && (
+						<section className={"upload-panel" + (isDropActive?" drop-active":"")} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+							{parseResult && (
+								<label className="upload-btn"><DragonOrbIcon size={16} className="orb-icon" /> Upload PDF(s)
+									<input ref={fileInputRef} type="file" accept="application/pdf" multiple onChange={onFileInputChange} />
+								</label>
 							)}
-						{loading && <div className="spinner" />}
-						{error && <div className="error">{error}</div>}
-					</section>
+							{parseResult && !loading && (
+								<button className="reset-btn" onClick={resetApp} title="Clear parsed data and return to cover">↩︎ Back</button>
+							)}
+								{backendStatus === 'down' && <div className="error">Backend offline (start API on :8000)</div>}
+								{uploadWarnings.length > 0 && (
+									<div className="upload-warning" role="alert" aria-live="polite">
+										<ul>{uploadWarnings.map((w,i)=><li key={i}>{w}</li>)}</ul>
+										<button type="button" className="dismiss-upload-warning" aria-label="Dismiss upload warnings" onClick={()=> setUploadWarnings([])}>×</button>
+									</div>
+								)}
+							{loading && <div className="spinner" />}
+							{error && <div className="error">{error}</div>}
+						</section>
+					)}
 					{parseResult && !loading && (
 							<section className="metrics">
 								<div className={`metric composite accounts-metric ${consistencySummary? ('status-'+consistencySummary.status):''}`}>
@@ -2945,24 +2799,9 @@ const dailyNetChart = useMemo(() => {
 					): null}
 						<div aria-live="polite" className="sr-only" id="status-msg">{liveStatus}</div>
 						<div aria-live="polite" className="sr-only" id="drag-status-msg">{dragAnnounce}</div>
-					{tourOpen && (
-						<div className="tour-modal" role="dialog" aria-modal="true" aria-labelledby="tour-title">
-							<div className="tour-content">
-								<h2 id="tour-title">Quick Tour</h2>
-								<ol>
-									<li><strong>Upload / Demo:</strong> Start with your PDF or the demo sample.</li>
-									<li><strong>Filter & Types:</strong> Narrow rows instantly; stats & charts update live.</li>
-									<li><strong>Download:</strong> Export filtered data with summary insights.</li>
-									<li><strong>Columns:</strong> Toggle visibility to focus what matters.</li>
-								</ol>
-								<button onClick={()=> setTourOpen(false)} className="close-tour">Close</button>
-							</div>
-							<div className="tour-backdrop" onClick={()=> setTourOpen(false)} />
-						</div>
-					)}
-					{whatsNewOpen && (
-						<div className="tour-modal" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
-							<div className="tour-content whatsnew">
+					{infoModalOpen && (
+						<div className="info-modal" role="dialog" aria-modal="true" aria-labelledby="whatsnew-title">
+							<div className="info-content whatsnew">
 								<h2 id="whatsnew-title">What’s New</h2>
 								<ul className="changelog">
 										<li><strong>Date Format Preference:</strong> Switch between M/D/Y and D/M/Y (persisted).</li>
@@ -2970,9 +2809,9 @@ const dailyNetChart = useMemo(() => {
 									<li><strong>FAQ & Tooltips:</strong> Faster understanding of metrics.</li>
 									<li><strong>Idle Arrow & PDF Badge:</strong> Visual hints on cover.</li>
 								</ul>
-								<button onClick={()=> setWhatsNewOpen(false)} className="close-tour">Close</button>
+								<button onClick={()=> setInfoModalOpen(false)} className="modal-close">Close</button>
 							</div>
-							<div className="tour-backdrop" onClick={()=> setWhatsNewOpen(false)} />
+							<div className="info-backdrop" onClick={()=> setInfoModalOpen(false)} />
 						</div>
 					)}
 				</main>

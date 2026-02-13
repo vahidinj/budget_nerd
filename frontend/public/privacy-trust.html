@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy & Trust | MyBudgetNerd</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --fg: #d9e2e8;
+        --muted: #9aa6b2;
+        --accent: #ffb347;
+        --card: #141a22;
+        --border: rgba(255, 255, 255, 0.08);
+      }
+      body {
+        margin: 0;
+        padding: 2.5rem 1.5rem 3rem;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, "Roboto", "Helvetica Neue", Arial, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      main { max-width: 900px; margin: 0 auto; }
+      h1 { margin: 0 0 0.75rem; font-size: 2.2rem; }
+      h2 { margin-top: 1.8rem; font-size: 1.05rem; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+      p, li { line-height: 1.6; color: var(--muted); }
+      a { color: var(--accent); }
+      .meta { color: var(--muted); font-size: 0.95rem; }
+      .pill { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 1.2rem 0; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+      .card strong { color: var(--fg); display: block; margin-bottom: 0.35rem; }
+      .back-link { display: inline-flex; margin-top: 1.6rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="pill">Privacy & Trust</div>
+      <h1>Your data stays yours.</h1>
+      <p class="meta">MyBudgetNerd is a product of Athena Data Labs. Copyright holder: Athena Analytics LLC.</p>
+      <p class="meta">Effective date: February 13, 2026</p>
+
+      <p>This page explains how your statement data is handled when you use MyBudgetNerd. The goal is simple: give you clarity without storing your PDFs.</p>
+
+      <div class="grid">
+        <div class="card">
+          <strong>PDFs stay on your system</strong>
+          <p>Uploaded PDFs are parsed in-memory and are not persisted by default. Results are returned to your browser for analysis.</p>
+        </div>
+        <div class="card">
+          <strong>AI refinement is opt-in</strong>
+          <p>Only sanitized transaction descriptions are shared. PDFs, account numbers, and balances do not leave the server.</p>
+        </div>
+        <div class="card">
+          <strong>You control retention</strong>
+          <p>Clear local cached data at any time using the Clear action in Recent. You decide what to keep.</p>
+        </div>
+      </div>
+
+      <h2>What happens to my PDF?</h2>
+      <ul>
+        <li>Your PDF is uploaded over HTTPS to the backend for parsing.</li>
+        <li>The server parses it in-memory and returns structured transactions to your browser.</li>
+        <li>By default, the PDF is not stored on the server.</li>
+      </ul>
+
+      <h2>What data is shared for AI refinement?</h2>
+      <ul>
+        <li>Only sanitized transaction descriptions are sent when AI refinement is enabled.</li>
+        <li>Account numbers, balances, and the PDF itself are never transmitted.</li>
+        <li>AI refinement can be toggled off at any time.</li>
+      </ul>
+
+      <h2>Local storage and caching</h2>
+      <ul>
+        <li>We store minimal session data in your browser to improve continuity (like recent file names).</li>
+        <li>No raw PDFs are stored locally by the app.</li>
+        <li>Use Clear in Recent to remove cached data and reset the interface.</li>
+      </ul>
+
+      <h2>Security posture</h2>
+      <ul>
+        <li>Transfers are excluded from analytics to avoid double counting.</li>
+        <li>Uploads are secured with HTTPS in transit.</li>
+        <li>Open source transparency: review the codebase on GitHub.</li>
+      </ul>
+
+      <h2>Contact</h2>
+      <p>Questions about privacy or data handling? Email <a href="mailto:athena.analytics.llc@gmail.com">athena.analytics.llc@gmail.com</a>.</p>
+
+      <a class="back-link" href="/">Back to app</a>
+    </main>
+  </body>
+</html>
