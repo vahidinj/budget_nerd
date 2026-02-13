@@ -135,6 +135,7 @@ const parseDateToLocalMs = (raw?: string): number | null => {
 const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
 export const App: React.FC = () => {
+	const currentYear = new Date().getFullYear();
 	// Resolve CSS chart tokens once for Plot configs. Fall back to hard-coded hex if not available.
 	const getCssVar = (name: string, fallback = '') => {
 		try {
@@ -1667,26 +1668,37 @@ const dailyNetChart = useMemo(() => {
 	// Windowed rows (virtualization) — explicitly clamp to show at least 11 rows
 	const windowedRows = useWindowedRows(filteredTxns, TXN_ROW_HEIGHT, 5, 400, 600, 11);
 
-	// Consolidated Filters dropdown state
 	// Progressive disclosure: hide advanced charts until user categorizes or explicitly enables
 	const [showAdvancedCharts, setShowAdvancedCharts] = useState(true);
+
+	const hasMultiSources = useMemo(() => {
+		const sources = (parseResult as any)?.sources;
+		return Array.isArray(sources) && sources.length > 1;
+	}, [parseResult]);
+
+	const dateFilterActive = useMemo(() => {
+		if (!dateStart && !dateEnd) return false;
+		if (dataMinDate && dataMaxDate) {
+			return !(dateStart === dataMinDate && dateEnd === dataMaxDate);
+		}
+		return true;
+	}, [dateStart, dateEnd, dataMinDate, dataMaxDate]);
 
 	// Determine if Reset should be shown (hide when only date filters are at dataset defaults)
 	const shouldShowReset = useMemo(() => {
 		const hasText = !!rawFilter;
 		const hasTypes = activeAccountTypes.length > 0;
 		const hasSources = activeSources.length > 0; // default all-sources is empty list
-		let hasDateDeviation = false;
-		if (dateStart || dateEnd) {
-			// If bounds exist, only treat as active when deviating from them; else any non-empty counts
-			if (dataMinDate && dataMaxDate) {
-				hasDateDeviation = !(dateStart === dataMinDate && dateEnd === dataMaxDate);
-			} else {
-				hasDateDeviation = true;
-			}
-		}
-		return hasText || hasTypes || hasSources || hasDateDeviation;
-	}, [rawFilter, activeAccountTypes, activeSources, dateStart, dateEnd, dataMinDate, dataMaxDate]);
+		return hasText || hasTypes || hasSources || dateFilterActive;
+	}, [rawFilter, activeAccountTypes, activeSources, dateFilterActive]);
+
+	const activeFilterLabels = useMemo(() => {
+		const labels: string[] = [];
+		if (rawFilter) labels.push('Search');
+		if (dateFilterActive) labels.push('Date');
+		if (hasMultiSources && activeSources.length) labels.push(`Sources (${activeSources.length})`);
+		return labels;
+	}, [rawFilter, dateFilterActive, activeAccountTypes, activeSources, hasMultiSources]);
 
 	const resetApp = useCallback(() => {
 		setParseResult(null);
@@ -2729,25 +2741,33 @@ const dailyNetChart = useMemo(() => {
 						</section>
 					)}
 					{parseResult && (
-						<section className="filters consolidated advanced-only">
+						<section className="filters consolidated advanced-only table-filters" aria-label="Table filters">
 							<div className="filters-head">
-								{shouldShowReset && (
-									<button className="clear-filters inline head-clear" onClick={()=>{
-										setRawFilter(''); setFilter(''); setActiveAccountTypes([]); setActiveSources([]);
-										// Restore to dataset bounds if available, else clear
-										setDateStart(dataMinDate || '');
-										setDateEnd(dataMaxDate || '');
-										setLiveStatus('Filters reset to defaults.');
-									}}>Reset</button>
-								)}
-								<div
-									className={`ai-status-pill ${aiIndicator.cls}`}
-									title={aiIndicator.detail || (aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined)}
-									aria-live="polite"
-								>
-									{aiIndicator.text}
+								<div className="filters-title">
+									<div className="filters-label">Table filters</div>
+									<div className="filters-meta">Showing {filteredTxns.length} of {parseResult.transactions.length} rows</div>
+								</div>
+								<div className="filters-head-actions">
+									{shouldShowReset && (
+										<button className="clear-filters inline head-clear" onClick={()=>{
+											setRawFilter(''); setFilter(''); setActiveAccountTypes([]); setActiveSources([]);
+											// Restore to dataset bounds if available, else clear
+											setDateStart(dataMinDate || '');
+											setDateEnd(dataMaxDate || '');
+											setLiveStatus('Filters reset to defaults.');
+										}}>Reset</button>
+									)}
 								</div>
 							</div>
+							{activeFilterLabels.length > 0 && (
+								<div className="filters-summary" aria-live="polite">
+									<span className="filters-summary-label">Active</span>
+									{activeFilterLabels.map(label => (
+										<span key={label} className="filters-summary-chip">{label}</span>
+									))}
+								</div>
+							)}
+							<div className="filters-panel">
 								<div className="filters-advanced">
 									<div className="filters-advanced-body">
 										<div className="filters-secondary-row">
@@ -2764,50 +2784,58 @@ const dailyNetChart = useMemo(() => {
 															setActiveSources(prev => {
 																if(prev.includes(name)) { const next = prev.filter(x=> x!==name); return next; }
 																return [...prev, name];
-														});
-													}} title="Toggle inclusion of this source file in views">{name}</button>;
-												})}
-											</div>
-										)}
+															});
+														}} title="Toggle inclusion of this source file in views">{name}</button>;
+													})}
+												</div>
+											)}
 										</div>
 									</div>
 								</div>
-						</section>
-					)}
-					{parseResult && (
-						<section className="table-controls" aria-label="Search and column controls">
-							<div className="table-search">
-								<input ref={filterInputRef} className="filter-text table-search-input" placeholder="Search description" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
-								<div className="date-range compact table-date-range" aria-label="Date range">
-									<label><span className="lbl">Start</span><DatePicker value={dateStart} onChange={setDateStart} ariaLabel="Start date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
-									<label><span className="lbl">End</span><DatePicker value={dateEnd} onChange={setDateEnd} ariaLabel="End date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
+								<div className="table-controls" aria-label="Search and column controls">
+									<div className="table-search">
+										<input ref={filterInputRef} className="filter-text table-search-input" placeholder="Search description" value={rawFilter} onChange={e => setRawFilter(e.target.value)} />
+										<div className="date-range compact table-date-range" aria-label="Date range">
+											<label><span className="lbl">Start</span><DatePicker value={dateStart} onChange={setDateStart} ariaLabel="Start date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
+											<label><span className="lbl">End</span><DatePicker value={dateEnd} onChange={setDateEnd} ariaLabel="End date" min={dataMinDate || undefined} max={dataMaxDate || undefined} /></label>
+										</div>
+									</div>
+									<div className="table-categorize">
+										<CategorizeCluster
+											onUncategorize={uncategorizeAll}
+											categoriesApplied={categoriesApplied}
+											categorizeLoading={categorizeLoading}
+											isRefiningAI={isRefiningAI}
+											useAI={useAI}
+											onCategorize={() => categorizeTransactions('initial')}
+											onToggleAI={() => { if(useAI){ setUseAI(false); return; } requestEnableAI(); }}
+											justCategorizedFlash={justCategorizedFlash}
+										/>
+										<div className="table-ai-status">
+											<div
+												className={`ai-status-pill ${aiIndicator.cls}`}
+												title={aiIndicator.detail || (aiStatus?.last_error ? `Last error: ${aiStatus.last_error}` : undefined)}
+												aria-live="polite"
+											>
+												{aiIndicator.text}
+											</div>
+										</div>
+									</div>
+									<div className="table-columns" aria-label="Column visibility">
+										{Object.entries(visibleCols).map(([key, val]) => (
+											<button
+												key={key}
+												type="button"
+												className={"col-toggle-btn" + (val ? ' active' : '')}
+												aria-pressed={val}
+												onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
+												title={(val? 'Hide ':'Show ') + key + ' column'}
+											>
+												<span className="indicator" aria-hidden="true" />{key}
+											</button>
+										))}
+									</div>
 								</div>
-							</div>
-							<div className="table-categorize">
-								<CategorizeCluster
-									onUncategorize={uncategorizeAll}
-									categoriesApplied={categoriesApplied}
-									categorizeLoading={categorizeLoading}
-									isRefiningAI={isRefiningAI}
-									useAI={useAI}
-									onCategorize={() => categorizeTransactions('initial')}
-									onToggleAI={() => { if(useAI){ setUseAI(false); return; } requestEnableAI(); }}
-									justCategorizedFlash={justCategorizedFlash}
-								/>
-							</div>
-							<div className="table-columns" aria-label="Column visibility">
-								{Object.entries(visibleCols).map(([key, val]) => (
-									<button
-										key={key}
-										type="button"
-										className={"col-toggle-btn" + (val ? ' active' : '')}
-										aria-pressed={val}
-										onClick={()=> setVisibleCols(prev=> ({...prev, [key]: !prev[key as keyof typeof prev]}))}
-										title={(val? 'Hide ':'Show ') + key + ' column'}
-									>
-										<span className="indicator" aria-hidden="true" />{key}
-									</button>
-								))}
 							</div>
 						</section>
 					)}
@@ -2818,18 +2846,18 @@ const dailyNetChart = useMemo(() => {
 									<table className="txn-table" style={{height: windowedRows.total * TXN_ROW_HEIGHT}}>
 									<caption className="sr-only">Parsed transactions table. Columns: Date, Description, Amount, Balance, Account.</caption>
 									<colgroup>
-											{visibleCols.date && <col style={{width:'120px'}} />}
-											{visibleCols.description && <col />}
-											{visibleCols.category && <col style={{width:'120px'}} />}
-											{visibleCols.amount && <col style={{width:'110px'}} />}
-											{visibleCols.balance && <col style={{width:'110px'}} />}
-											{visibleCols.type && <col style={{width:'100px'}} />}
-											{visibleCols.source && <col style={{width:'160px'}} />}
+										{visibleCols.date && <col style={{width:'75px'}} />}
+										{visibleCols.description && <col style={{width:'240px'}} />}
+										{visibleCols.category && <col style={{width:'120px'}} />}
+										{visibleCols.amount && <col style={{width:'120px'}} />}
+										{visibleCols.balance && <col style={{width:'120px'}} />}
+										{visibleCols.type && <col style={{width:'120px'}} />}
+										{visibleCols.source && <col style={{width:'120px'}} />}
 									</colgroup>
 									<thead>
 										<tr>
-												{visibleCols.date && <th className="sortable" onClick={() => toggleSort('date')} aria-sort={sort?.key==='date'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Date {sort?.key==='date' && (sort.dir==='asc'?'▲':'▼')}</th>}
-												{visibleCols.description && <th className="sortable" onClick={() => toggleSort('description')} aria-sort={sort?.key==='description'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Description {sort?.key==='description' && (sort.dir==='asc'?'▲':'▼')}</th>}
+												{visibleCols.date && <th className="sortable col-date" onClick={() => toggleSort('date')} aria-sort={sort?.key==='date'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Date {sort?.key==='date' && (sort.dir==='asc'?'▲':'▼')}</th>}
+												{visibleCols.description && <th className="sortable col-description" onClick={() => toggleSort('description')} aria-sort={sort?.key==='description'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Description {sort?.key==='description' && (sort.dir==='asc'?'▲':'▼')}</th>}
 												{visibleCols.category && <th className="col-category">Category</th>}
 												{visibleCols.amount && <th className="sortable col-amount" onClick={() => toggleSort('amount')} aria-sort={sort?.key==='amount'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Amount {sort?.key==='amount' && (sort.dir==='asc'?'▲':'▼')}</th>}
 												{visibleCols.balance && <th className="sortable col-balance" onClick={() => toggleSort('balance')} aria-sort={sort?.key==='balance'? (sort.dir==='asc'?'ascending':'descending'):'none'}>Balance {sort?.key==='balance' && (sort.dir==='asc'?'▲':'▼')}</th>}
@@ -2849,7 +2877,7 @@ const dailyNetChart = useMemo(() => {
 												const aiChanged = !!t.ai_changed || t.category_source === 'ai';
 												return (
 													<tr key={globalIdx >= 0 ? globalIdx : (windowedRows.startIndex + idx)} className={aiChanged ? 'ai-row' : undefined}>
-														{visibleCols.date && <td>{formatDate(t.date)}</td>}
+														{visibleCols.date && <td className="col-date">{formatDate(t.date)}</td>}
 														{visibleCols.description && <td className="desc" title={t.description}>{highlightDescription(t.description)}</td>}
 														{visibleCols.category && <td className={"col-category " + (t.category_source === 'override' ? 'category-override' : '') + (aiChanged ? ' category-ai' : '')}>
 															<div style={{display:'flex', alignItems:'center', gap:8}}>
@@ -2951,58 +2979,81 @@ const dailyNetChart = useMemo(() => {
 				<footer className="site-footer" role="contentinfo">
 					<div className="footer-inner">
 						<div className="footer-left">
-							<span className="brand">mybudgetnerd.com</span>
-							<span className="sep">·</span>
-							<button
-								className="contact-trigger"
-								type="button"
-								aria-expanded={contactOpen}
-								aria-controls="contact-panel"
-								onClick={()=> setContactOpen(o=> !o)}
-							>
-								Contact
-								<span className="caret" aria-hidden="true">▾</span>
-							</button>
-							<div
-								id="contact-panel"
-								className={`contact-popover ${contactOpen ? 'open' : ''}`}
-								role="dialog"
-								aria-label="Contact form"
-							>
-								<div className="contact-popover-head">
-									<span>Contact the developer</span>
-									<a href="mailto:athena.analytics.llc@gmail.com" className="footer-link">athena.analytics.llc@gmail.com</a>
-								</div>
-								<div className="contact-fields">
-									<input
-										className="contact-input"
-										placeholder="Your name (optional)"
-										value={contactName}
-										onChange={(e)=> setContactName(e.target.value)}
-									/>
-									<input
-										className="contact-input"
-										type="email"
-										placeholder="Your email (optional)"
-										value={contactEmail}
-										onChange={(e)=> setContactEmail(e.target.value)}
-									/>
-									<textarea
-										className="contact-textarea"
-										rows={3}
-										placeholder="How can we help?"
-										value={contactMessage}
-										onChange={(e)=> setContactMessage(e.target.value)}
-									/>
-								</div>
-								<div className="contact-actions">
-									<button className="btn small" type="button" onClick={handleContactSend}>Send Message</button>
-									<button className="btn small ghost" type="button" onClick={()=> setContactOpen(false)}>Close</button>
-								</div>
+							<div className="footer-brandline">
+								<span className="brand">mybudgetnerd.com</span>
+								<span className="sep">·</span>
+								<span className="brand-note">
+									A product of <a className="footer-link" href="https://athenadatalabs.com" target="_blank" rel="noreferrer">Athena Data Labs</a>
+								</span>
+							</div>
+							<div className="footer-legal">
+								<span className="copyright">© {currentYear} Athena Analytics LLC</span>
+								<span className="sep">·</span>
+								<span className="legal-note">All rights reserved.</span>
 							</div>
 						</div>
 						<div className="footer-right">
-							<small>Secure · Private · Ephemeral</small>
+							<nav className="footer-links" aria-label="Legal">
+								<a className="footer-link" href="/privacy.html">Privacy Policy</a>
+								<span className="sep">·</span>
+								<a className="footer-link" href="/terms.html">Terms of Service</a>
+								<span className="sep">·</span>
+								<a className="footer-link" href="/cookies.html">Cookie Policy</a>
+								<span className="sep">·</span>
+								<a className="footer-link" href="/billing.html">Billing Policy</a>
+							</nav>
+							<div className="footer-trust">
+								<small>Secure · Private · Ephemeral</small>
+							</div>
+							<div className="contact-wrap">
+								<button
+									className="contact-trigger"
+									type="button"
+									aria-expanded={contactOpen}
+									aria-controls="contact-panel"
+									onClick={()=> setContactOpen(o=> !o)}
+								>
+									Contact
+									<span className="caret" aria-hidden="true">▾</span>
+								</button>
+								<div
+									id="contact-panel"
+									className={`contact-popover ${contactOpen ? 'open' : ''}`}
+									role="dialog"
+									aria-label="Contact form"
+								>
+									<div className="contact-popover-head">
+										<span>Contact Athena Data Labs</span>
+										<a href="mailto:athena.analytics.llc@gmail.com" className="footer-link">athena.analytics.llc@gmail.com</a>
+									</div>
+									<div className="contact-fields">
+										<input
+											className="contact-input"
+											placeholder="Your name (optional)"
+											value={contactName}
+											onChange={(e)=> setContactName(e.target.value)}
+										/>
+										<input
+											className="contact-input"
+											type="email"
+											placeholder="Your email (optional)"
+											value={contactEmail}
+											onChange={(e)=> setContactEmail(e.target.value)}
+										/>
+										<textarea
+											className="contact-textarea"
+											rows={3}
+											placeholder="How can we help?"
+											value={contactMessage}
+											onChange={(e)=> setContactMessage(e.target.value)}
+										/>
+									</div>
+									<div className="contact-actions">
+										<button className="btn small" type="button" onClick={handleContactSend}>Send Message</button>
+										<button className="btn small ghost" type="button" onClick={()=> setContactOpen(false)}>Close</button>
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 				</footer>

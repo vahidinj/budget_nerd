@@ -196,7 +196,7 @@ except ImportError:
 _openai_client = None  # lazy
 _openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
 _openai_batch_size = int(os.getenv("OPENAI_BATCH_SIZE", "20"))
-_openai_cache: dict[str, str] = {}  # desc -> category
+_openai_cache: dict[str, str] = {}  # desc|account_type -> category
 _ai_status_cache: dict[str, object] = {
     "last_checked": None,
     "last_ok": None,
@@ -370,15 +370,18 @@ def get_ai_status(validate: bool = False) -> Dict[str, Any]:
     return status
 
 
-def ai_refine_category(description: str, base_category: str) -> str:
+def ai_refine_category(
+    description: str, base_category: str, account_type: str | None = None
+) -> str:
     """Backward-compatible wrapper returning only final category via OpenAI."""
-    final, *_ = ai_refine_with_info(description, base_category)
+    final, *_ = ai_refine_with_info(description, base_category, account_type)
     return final
 
 
 def ai_refine_with_info(
     description: str,
     base_category: str,
+    account_type: str | None = None,
     use_ai_override: bool | None = None,
 ) -> tuple[str, str | None, float | None, float | None]:
     """Use OpenAI to refine category; returns (final, ai_candidate, confidence, api_used)."""
@@ -393,7 +396,8 @@ def ai_refine_with_info(
         return base_category, None, None, None
 
     # Check cache first
-    key = description.strip().upper()
+    acct_key = (account_type or "").strip().upper()
+    key = f"{description.strip().upper()}|{acct_key}"
     if key in _openai_cache:
         cached_cat = _openai_cache[key]
         confidence = 1.0 if cached_cat in CANONICAL_CATEGORIES else 0.0
@@ -409,15 +413,19 @@ def ai_refine_with_info(
         return base_category, None, None, None
 
     try:
-        prompt = (
-            "You are a strict transaction classifier. "
-            "Pick the BEST category from the allowed list. "
-            "If the base category is wrong, replace it. "
-            "Respond with ONLY the category name.\n\n"
-            f"Allowed categories: {', '.join(CANONICAL_CATEGORIES)}\n"
-            f"Base category (heuristic): {base_category}\n"
-            f"Transaction: {description}"
-        )
+        prompt_lines = [
+            "You are a strict transaction classifier.",
+            "Pick the BEST category from the allowed list.",
+            "If the base category is wrong, replace it.",
+            "Respond with ONLY the category name.",
+            "",
+            f"Allowed categories: {', '.join(CANONICAL_CATEGORIES)}",
+            f"Base category (heuristic): {base_category}",
+        ]
+        if account_type:
+            prompt_lines.append(f"Account type: {account_type}")
+        prompt_lines.append(f"Transaction: {description}")
+        prompt = "\n".join(prompt_lines)
 
         response = client.chat.completions.create(
             model=_openai_model,
@@ -452,6 +460,7 @@ def ai_refine_with_info(
 def _ai_refine_batch(
     descriptions: list[str],
     base_categories: list[str],
+    account_types: list[str | None],
 ) -> list[tuple[str, str | None, float | None, float | None]]:
     """Batch OpenAI categorization. Returns list of (final, ai_candidate, confidence, api_used)."""
     results: list[tuple[str, str | None, float | None, float | None]] = []
@@ -468,9 +477,12 @@ def _ai_refine_batch(
     results = [("", None, None, None) for _ in descriptions]
 
     # Build list of uncached items to send to API
-    pending: list[tuple[int, str, str]] = []  # (idx, desc, base)
-    for i, (desc, base) in enumerate(zip(descriptions, base_categories)):
-        key = desc.strip().upper()
+    pending: list[tuple[int, str, str, str | None]] = []  # (idx, desc, base, acct)
+    for i, (desc, base, acct) in enumerate(
+        zip(descriptions, base_categories, account_types)
+    ):
+        acct_key = (acct or "").strip().upper()
+        key = f"{desc.strip().upper()}|{acct_key}"
         if not desc.strip():
             results[i] = (base, None, None, None)
             continue
@@ -480,7 +492,7 @@ def _ai_refine_batch(
             ai_candidate = cached_cat if cached_cat != base else None
             results[i] = (cached_cat, ai_candidate, confidence, 1.0)
             continue
-        pending.append((i, desc, base))
+        pending.append((i, desc, base, acct))
 
     # Process in batches
     for offset in range(0, len(pending), batch_size):
@@ -492,10 +504,11 @@ def _ai_refine_batch(
             "You are a strict transaction classifier.",
             "Return ONLY a JSON array of category strings matching the inputs in order.",
             f"Allowed categories: {allowed}",
-            "Inputs (description | base category):",
+            "Inputs (description | base category | account type):",
         ]
-        for i, (orig_i, desc, base) in enumerate(chunk, start=1):
-            prompt_lines.append(f"{i}. {desc} | base: {base}")
+        for i, (orig_i, desc, base, acct) in enumerate(chunk, start=1):
+            acct_label = acct or "unknown"
+            prompt_lines.append(f"{i}. {desc} | base: {base} | account: {acct_label}")
         prompt = "\n".join(prompt_lines)
 
         try:
@@ -514,11 +527,13 @@ def _ai_refine_batch(
         except Exception:
             parsed = [None] * len(chunk)
 
-        for i, (orig_i, desc, base) in enumerate(chunk):
+        for i, (orig_i, desc, base, acct) in enumerate(chunk):
             ai_cat = parsed[i] if isinstance(parsed[i], str) else base
             if ai_cat not in CANONICAL_CATEGORIES:
                 ai_cat = base
-            _openai_cache[desc.strip().upper()] = ai_cat
+            acct_key = (acct or "").strip().upper()
+            cache_key = f"{desc.strip().upper()}|{acct_key}"
+            _openai_cache[cache_key] = ai_cat
             confidence = 1.0
             ai_candidate = ai_cat if ai_cat != base else None
             results[orig_i] = (ai_cat, ai_candidate, confidence, 1.0)
@@ -641,18 +656,24 @@ def categorize_records_with_overrides(
     out: list[Dict[str, Any]] = []
     metas: list[Dict[str, Any]] = []
     descs: list[str] = []
+    accts: list[str | None] = []
 
     for rec in records:
         desc = (rec.get("description") or "") if isinstance(rec, dict) else ""
+        acct = None
+        if isinstance(rec, dict):
+            acct = str(rec.get("account_type") or "").lower().strip() or None
         meta = categorize_with_metadata(desc, use_ai=False)
         metas.append(meta)
         descs.append(desc)
+        accts.append(acct)
 
     ai_enabled = _use_ai() if use_ai is None else bool(use_ai)
     if ai_enabled and _get_openai_client() is not None:
         idxs: list[int] = []
         ai_descs: list[str] = []
         ai_bases: list[str] = []
+        ai_accts: list[str | None] = []
         for i, meta in enumerate(metas):
             if meta.get("final_category") == "" or meta.get("skipped"):
                 continue
@@ -668,8 +689,9 @@ def categorize_records_with_overrides(
             idxs.append(i)
             ai_descs.append(descs[i])
             ai_bases.append(base)
+            ai_accts.append(accts[i])
         if ai_descs:
-            batch_results = _ai_refine_batch(ai_descs, ai_bases)
+            batch_results = _ai_refine_batch(ai_descs, ai_bases, ai_accts)
             for idx, (final, ai_candidate, margin, api_used) in zip(
                 idxs, batch_results
             ):

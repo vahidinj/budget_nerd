@@ -21,7 +21,7 @@ export USE_AI_CATEGORIES=1
 export OPENAI_API_KEY=sk-your_key_here
 export OPENAI_MODEL=gpt-4o
 ```
-Only transaction descriptions are sent to OpenAI when enabled; PDFs and full statement text never leave your system.
+Only transaction descriptions and the account type (checking, savings, credit card) are sent to OpenAI when enabled. Account numbers are never sent or used, and PDFs and full statement text never leave your system.
 
 ## Key Environment Variables
 - `USE_AI_CATEGORIES` (unset by default)

@@ -31,15 +31,26 @@ When deploying to AWS Elastic Beanstalk or Amplify, add environment variables fo
 
 **Do not put secrets in code or config files.**
 
+## Legal & Policies
+Public-facing policies live in the frontend static pages:
+
+- Privacy Policy: https://mybudgetnerd.com/privacy.html
+- Terms of Service: https://mybudgetnerd.com/terms.html
+- Cookie Policy (no cookies used): https://mybudgetnerd.com/cookies.html
+- Billing Policy (template for future payments): https://mybudgetnerd.com/billing.html
+
+MyBudgetNerd is a product of Athena Data Labs (https://athenadatalabs.com). Copyright holder: Athena Analytics LLC.
+
 ## Draft: Privacy & Data Handling (To Be Finalized Pre-AWS)
-This section is an initial draft outlining how end‑user data is handled. It will be reviewed and possibly expanded (e.g., with Data Protection Impact Assessment references, retention policy specifics, and jurisdictional disclosures) before production deployment on AWS (Elastic Beanstalk/Amplify).
+This section is an initial draft outlining how end-user data is handled. It will be reviewed and possibly expanded (e.g., with retention policy specifics and jurisdictional disclosures) before production deployment on AWS (Elastic Beanstalk/Amplify).
 
 ### Guiding Principles
 1. Minimum collection: Only transaction lines required for categorization & analytics are extracted.
 2. Server-side, ephemeral processing: When deployed to AWS the frontend uploads PDFs over HTTPS to the backend (Elastic Beanstalk) where parsing and analysis occur in-memory. By default parsed data is not persisted.
 3. Ephemeral by default: Parsed transactions are held in memory for the session and not persisted unless an explicit persistence feature is later enabled.
-4. Transparency & control: Feature flags and environment variables clearly control any optional components (e.g., AI refinement). AI refinement runs on the backend and is strictly opt-in.
-5. Security in depth: Network egress restriction + dependency pinning + principle of least privilege for any future cloud resources.
+4. No analytics or tracking cookies: The service does not use analytics or ad trackers by default.
+5. Transparency & control: Feature flags and environment variables clearly control any optional components (e.g., AI refinement). AI refinement runs on the backend and is strictly opt-in.
+6. Security in depth: Network egress restriction + dependency pinning + principle of least privilege for any future cloud resources.
 
 ### Data Flow Summary
 1. User uploads PDF → sent over HTTPS directly to the backend service (Elastic Beanstalk).
@@ -51,12 +62,13 @@ This section is an initial draft outlining how end‑user data is handled. It wi
 
 ### What Is NOT Done (By Default)
 - No persistent storage of PDFs or parsed transactions (unless an explicit persistence mode is later enabled).
+- No analytics, tracking pixels, or advertising cookies.
 - No transmission of financial data to external AI or SaaS APIs for categorization unless you explicitly enable AI refinement.
 - No logging of full raw descriptions or amounts (only high-level events if logging is later added; currently none persisted by default).
 - No cross-user data sharing or multi-tenant aggregation features.
 
 ### Optional AI Categorization Privacy
-If enabled, the backend sends only transaction descriptions (e.g., "STARBUCKS #1234") to OpenAI for category refinement. The PDF file and full statement text never leave your system. Results are cached per description to reduce API calls.
+If enabled, the backend sends only transaction descriptions (e.g., "STARBUCKS #1234") and the account type (checking, savings, credit card) to OpenAI for category refinement. Account numbers are never sent or used. The PDF file and full statement text never leave your system. Results are cached per description and account type to reduce API calls.
 
 ### Environment / Configuration Variables
 | Variable | Purpose | Default | Privacy Impact |
