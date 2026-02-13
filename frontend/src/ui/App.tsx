@@ -166,6 +166,24 @@ export const App: React.FC = () => {
 		hoverBorder: getCssVar('--plot-hover-border', '#314051')
 	} as const;
 
+	const CHART_MARGIN = { l: 56, r: 6, t: 32, b: 24 } as const;
+	const CHART_FONT = { color: PLOT_COLORS.text, size: 11 } as const;
+	const AXIS_BASE = {
+		showgrid: false,
+		linecolor: PLOT_COLORS.line,
+		tickfont: { color: PLOT_COLORS.text, size: 10 },
+		automargin: true
+	} as const;
+	const AXIS_NUMERIC = {
+		...AXIS_BASE,
+		zerolinecolor: PLOT_COLORS.grid,
+		tickformat: ',.0f'
+	} as const;
+	const AXIS_CATEGORY = {
+		...AXIS_BASE,
+		zerolinecolor: PLOT_COLORS.grid
+	} as const;
+
 	const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
 	// Core UI + data states
 	const [error, setError] = useState<string | null>(null);
@@ -806,12 +824,12 @@ export const App: React.FC = () => {
 			layout: {
 				height: CHART_HEIGHT,
 				title: { text: 'Filtered vs Overall', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 60, r: 6, t: 32, b: 24 },
+				margin: CHART_MARGIN,
 				paper_bgcolor: 'rgba(0,0,0,0)',
 				plot_bgcolor: 'rgba(0,0,0,0)',
-				font: { color: PLOT_COLORS.text, size: 11 },
-			xaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickformat: ',.0f' },
-			yaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line },
+				font: CHART_FONT,
+				xaxis: AXIS_NUMERIC,
+				yaxis: AXIS_CATEGORY,
 			showlegend: false
 		}
 	};
@@ -860,10 +878,10 @@ const dailyNetChart = useMemo(() => {
 			layout: {
 				height: CHART_HEIGHT,
 				title: { text: 'Daily Net', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 44, r: 6, t: 32, b: 24 },
-				paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: PLOT_COLORS.text, size: 11 },
-				xaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickfont: { color: PLOT_COLORS.text, size: 10 } },
-				yaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true },
+				margin: CHART_MARGIN,
+				paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: CHART_FONT,
+				xaxis: AXIS_BASE,
+				yaxis: AXIS_NUMERIC,
 				legend: { orientation: 'h', x: 0, y: 1.12, font: { color: PLOT_COLORS.text, size: 10 } },
 				shapes,
 				hoverlabel: { bgcolor: PLOT_COLORS.hoverBg, bordercolor: PLOT_COLORS.hoverBorder, font: { color: PLOT_COLORS.text, size: 10 }, align: 'left' },
@@ -887,12 +905,9 @@ const dailyNetChart = useMemo(() => {
 		if(Object.values(sums).every(v => v === 0)) return null;
 		const labels = canonical.map(k => k.replace('_',' '));
 		const values = canonical.map(k => sums[k]);
-		// Dynamic left margin: scale with longest label length (approx 7px per char) but clamp for consistency
-		const longest = labels.reduce((a,b)=> a.length>b.length?a:b, '');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
+				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:CHART_MARGIN, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:CHART_FONT, xaxis:AXIS_NUMERIC, yaxis:AXIS_CATEGORY, showlegend:false }
 		};
 	}, [filteredTxns]);
 
@@ -913,11 +928,9 @@ const dailyNetChart = useMemo(() => {
 		const labels = ['Income','Savings','Expense'];
 		const values = [income, savings, expenseOut];
 		const colors = [CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.negative];
-		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
+				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:CHART_MARGIN, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:CHART_FONT, xaxis:AXIS_NUMERIC, yaxis:AXIS_CATEGORY, showlegend:false }
 		};
 	}, [filteredTxns]);
 
@@ -950,11 +963,9 @@ const dailyNetChart = useMemo(() => {
 		if(charges===0 && payments===0) return null;
 		const payoffRatio = charges>0 ? payments/charges : null;
 		const labels = ['Charges','Payments'];
-		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
 		return {
 			data:[{ type:'bar', orientation:'h', x:[charges,payments], y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition:'inside', insidetextanchor:'middle', textfont:{ color:PLOT_COLORS.markerEdge, size:11 }, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
-				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
+				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:CHART_MARGIN, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:CHART_FONT, xaxis:AXIS_NUMERIC, yaxis:AXIS_CATEGORY, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
 		};
 	}, [filteredTxns]);
 
@@ -1985,7 +1996,7 @@ const dailyNetChart = useMemo(() => {
 								<div className="cover-hero">
 									<div className="hero-copy">
 										<div className="hero-eyebrow">Budget Nerd</div>
-										<h1 id="cover-title" className="cover-global-title">Know where your money goes.</h1>
+										<h1 id="cover-title" className="cover-global-title">Know where your money goes</h1>
 										<p id="cover-desc" className="hero-sub" role="note">
 											Turn your statement PDF into clean, auto-tagged insights in minutes.
 											<span className="hero-subline">No setup, no clutter.</span>
