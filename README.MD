@@ -17,10 +17,10 @@ Active development. AWS deployment typically uses Elastic Beanstalk for the back
 ## Architecture
 ```mermaid
 flowchart LR
-	U[User] -->|Upload PDF| F[Frontend (Vite + React)]
-	F -->|HTTPS| B[Backend (FastAPI)]
-	B --> P[Parse + Categorize]
-	P -->|Optional| AI[OpenAI Refinement]
+	U[User] -->|Upload PDF| F["Frontend - Vite + React"]
+	F -->|HTTPS| B["Backend - FastAPI"]
+	B --> P["Parse + Categorize"]
+	P -->|Optional| AI["OpenAI Refinement"]
 	AI --> P
 	P -->|JSON results| F
 	F -->|Charts + Exports| U
