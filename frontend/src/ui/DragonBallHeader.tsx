@@ -8,7 +8,7 @@ export const DragonBallHeader: React.FC = () => {
         <MascotIcon size={36} />
         <div className="logo-content">
           <div className="logo-line">
-            <span className="brand">Budget Nerd</span>
+            <span className="brand">My Budget Nerd</span>
           </div>
           <span className="tagline">🔒 Secure · Private · Ephemeral</span>
         </div>

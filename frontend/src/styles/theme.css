@@ -1,3 +1,36 @@
+  /* Always show horizontal scrollbar for the search bar area */
+  .filters .search-composite {
+    overflow-x: scroll !important;
+    overflow-y: hidden !important;
+    position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: #5ab7ff #1a2530;
+  }
+
+  .filters .search-composite::after {
+    content: '';
+    display: block;
+    min-width: 120%;
+    height: 1px;
+  }
+
+  .filters .search-composite::-webkit-scrollbar {
+    height: 9px;
+    background: #1a2530;
+    display: block;
+  }
+
+  .filters .search-composite::-webkit-scrollbar-track {
+    background: #1a2530;
+    border-radius: 999px;
+  }
+
+  .filters .search-composite::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, #5ab7ff 0%, #3178c6 100%);
+    border-radius: 999px;
+    border: 2px solid #1a2530;
+    min-width: 40px;
+  }
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap');
 .cover.cover-minimal {
   position: relative;
@@ -544,11 +577,35 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 
 /* Mobile integration: search bar full-width; place date filters + categorize below it and keep symmetry */
 @media (max-width: 640px) {
-    .filters.consolidated {
-      padding: .45rem .5rem .5rem .5rem;
-    overflow-x:auto;
-    scrollbar-width:auto;
-    scrollbar-color:#36506a transparent;
+  .filters.consolidated {
+    padding:.45rem .5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #5ab7ff #1a2530;
+  }
+
+  /* Always show horizontal scrollbar */
+  .filters.consolidated {
+    -webkit-overflow-scrolling: auto;
+  }
+
+  .filters.consolidated::-webkit-scrollbar {
+    height: 9px;
+    background: #1a2530;
+    display: block;
+  }
+
+  .filters.consolidated::-webkit-scrollbar-track {
+    background: #1a2530;
+    border-radius: 999px;
+  }
+
+  .filters.consolidated::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, #5ab7ff 0%, #3178c6 100%);
+    border-radius: 999px;
+    border: 2px solid #1a2530;
+    min-width: 40px;
   }
 
   .filters.consolidated .filters-head {

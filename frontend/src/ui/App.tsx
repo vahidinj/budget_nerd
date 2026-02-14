@@ -106,11 +106,23 @@ const deriveAmountStats = (txs: Txn[]): AmountStats | null => {
 const formatNumber = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const formatInt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
+const getBarLabelPositions = (values: number[], smallRatio = 0.18) => {
+	const maxAbs = Math.max(0, ...values.map(v => Math.abs(v)));
+	if (!maxAbs) return values.map(() => 'inside');
+	return values.map(v => (Math.abs(v) <= maxAbs * smallRatio ? 'outside' : 'inside'));
+};
+
 const DEBOUNCE_MS = 220;
 const HEALTH_POLL_MS = 10000;
 const TXN_ROW_HEIGHT = 32;
 // Unified height for standard charts (keeps four-chart row visually consistent)
 const CHART_HEIGHT = 180;
+
+const ACCOUNT_MIX_LABELS = ['checking', 'savings', 'credit_card'];
+const calcYAxisMargin = (labels: string[]) => {
+	const longest = labels.reduce((a, b) => (a.length > b.length ? a : b), '');
+	return Math.min(105, Math.max(54, longest.replace('_', ' ').length * 7));
+};
 
 const _ymdLocalMs = (y: number, m: number, d: number) => new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
 const parseDateToLocalMs = (raw?: string): number | null => {
@@ -135,6 +147,10 @@ const parseDateToLocalMs = (raw?: string): number | null => {
 const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
 export const App: React.FC = () => {
+	// Detect small screen (mobile) mode
+	const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+	const mobileYAxisMargin = calcYAxisMargin(ACCOUNT_MIX_LABELS);
+
 	const currentYear = new Date().getFullYear();
 	// Resolve CSS chart tokens once for Plot configs. Fall back to hard-coded hex if not available.
 	const getCssVar = (name: string, fallback = '') => {
@@ -232,7 +248,6 @@ export const App: React.FC = () => {
 	const [dragAnnounce, setDragAnnounce] = useState('');
 	// Cover: minimalist 3-step front stage
 	const [frontStage, setFrontStage] = useState<1 | 2 | 3>(1);
-	const [showFrontDetails, setShowFrontDetails] = useState(false);
 	// Date range filter (inclusive). Empty string means no bound.
 	const [dateStart, setDateStart] = useState('');
 	const [dateEnd, setDateEnd] = useState('');
@@ -786,36 +801,57 @@ export const App: React.FC = () => {
 		});
 	};
 
-	const filteredVsOverallChart = useMemo(() => {
+	const netTrendComparisonChart = useMemo(() => {
 		if (!parseResult) return null;
-		// Use computed overall net from transactions for consistency with other metrics
-		const overall = parseResult.transactions.reduce((sum, t) => sum + (typeof t.amount === 'number' ? t.amount : 0), 0);
+		const overallByDay = new Map<string, number>();
+		const filteredByDay = new Map<string, number>();
+		const addToMap = (map: Map<string, number>, txs: Txn[]) => {
+			for (const t of txs) {
+				if (typeof t.amount !== 'number') continue;
+				const ms = parseDateToLocalMs(t.date);
+				if (ms === null) continue;
+				const key = toYMD(new Date(ms));
+				map.set(key, (map.get(key) || 0) + t.amount);
+			}
+		};
+		addToMap(overallByDay, parseResult.transactions);
+		addToMap(filteredByDay, filteredTxns);
+		const days = Array.from(new Set([...overallByDay.keys(), ...filteredByDay.keys()])).sort();
+		if (!days.length) return null;
+		const overallVals = days.map(d => overallByDay.get(d) || 0);
+		const filteredVals = days.map(d => filteredByDay.get(d) || 0);
+		const leftMargin = isMobile ? mobileYAxisMargin : 44;
+		const baseline = {
+			type: 'line',
+			xref: 'paper',
+			x0: 0,
+			x1: 1,
+			y0: 0,
+			y1: 0,
+			line: { color: PLOT_COLORS.line, width: 1.5 }
+		};
 		return {
-			data: [{
-				type: 'bar',
-				orientation: 'h',
-				x: [filteredNet, overall],
-				y: ['Filtered', 'Overall'],
-				marker: { color: [CHART_COLORS.accent, PLOT_COLORS.alt] },
-				text: [formatInt(filteredNet), formatInt(overall)],
-				textposition: 'inside',
-				insidetextanchor: 'middle',
-				textfont: { color: [PLOT_COLORS.markerEdge, PLOT_COLORS.text], size: 11 },
-				hovertemplate: '%{y}: %{x:,.0f}<extra></extra>'
-			}],
+			data: [
+				{ type: 'scatter', mode: 'lines+markers', x: days, y: filteredVals, name: 'Filtered', line: { color: CHART_COLORS.accent }, marker: { color: CHART_COLORS.accent, size: 5 }, hovertemplate: 'Filtered %{x}<br>%{y:,.0f}<extra></extra>' },
+				{ type: 'scatter', mode: 'lines', x: days, y: overallVals, name: 'Overall', line: { dash: 'dot', color: PLOT_COLORS.alt }, hovertemplate: 'Overall %{x}<br>%{y:,.0f}<extra></extra>' }
+			],
 			layout: {
 				height: CHART_HEIGHT,
-				title: { text: 'Filtered vs Overall', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 60, r: 6, t: 32, b: 24 },
+				title: { text: 'Net Trend Comparison', font: { color: PLOT_COLORS.text, size: 13 } },
+				margin: { l: leftMargin, r: 6, t: 32, b: 24 },
 				paper_bgcolor: 'rgba(0,0,0,0)',
 				plot_bgcolor: 'rgba(0,0,0,0)',
 				font: { color: PLOT_COLORS.text, size: 11 },
-			xaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line, tickformat: ',.0f' },
-			yaxis: { showgrid: false, zerolinecolor: PLOT_COLORS.grid, linecolor: PLOT_COLORS.line },
-			showlegend: false
-		}
-	};
-}, [parseResult, filteredNet]);
+				xaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickfont: { color: PLOT_COLORS.text, size: 10 } },
+				yaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true, zeroline: false },
+				legend: { orientation: 'h', x: 0, y: 1.12, font: { color: PLOT_COLORS.text, size: 10 } },
+				shapes: [baseline],
+				hoverlabel: { bgcolor: PLOT_COLORS.hoverBg, bordercolor: PLOT_COLORS.hoverBorder, font: { color: PLOT_COLORS.text, size: 10 }, align: 'left' },
+				hovermode: 'x unified'
+			},
+			config: { displaylogo: false }
+		};
+	}, [parseResult, filteredTxns]);
 
 const dailyNetChart = useMemo(() => {
 	if (!filteredTxns.length) return null;
@@ -829,6 +865,15 @@ const dailyNetChart = useMemo(() => {
 		const yMin = Math.min(...allY);
 		const yMax = Math.max(...allY);
 		const shapes = [] as any[];
+		shapes.push({
+			type: 'line',
+			xref: 'paper',
+			x0: 0,
+			x1: 1,
+			y0: 0,
+			y1: 0,
+			line: { color: PLOT_COLORS.line, width: 1.5 }
+		});
 		let highlightTraces: any[] = [];
 		if (hoverDate && days.includes(hoverDate)) {
 			// (Line removed: rely on unified hover vertical guide styled via CSS to avoid duplicate lines)
@@ -851,6 +896,7 @@ const dailyNetChart = useMemo(() => {
 				];
 			}
 		}
+		const leftMargin = isMobile ? mobileYAxisMargin : 44;
 		return {
 			data: [
 				{ type: 'scatter', mode: 'lines+markers', x: days, y: vals, name: 'Daily', line: { color: CHART_COLORS.positive }, marker: { color: CHART_COLORS.positive, size: 5 }, hovertemplate: 'Daily %{x}<br>%{y:,.0f}<extra></extra>' },
@@ -860,10 +906,10 @@ const dailyNetChart = useMemo(() => {
 			layout: {
 				height: CHART_HEIGHT,
 				title: { text: 'Daily Net', font: { color: PLOT_COLORS.text, size: 13 } },
-				margin: { l: 44, r: 6, t: 32, b: 24 },
+				margin: { l: leftMargin, r: 6, t: 32, b: 24 },
 				paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: PLOT_COLORS.text, size: 11 },
 				xaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickfont: { color: PLOT_COLORS.text, size: 10 } },
-				yaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true },
+				yaxis: { showgrid: false, linecolor: PLOT_COLORS.line, tickformat: ',.0f', tickfont: { color: PLOT_COLORS.text, size: 10 }, automargin: true, zeroline: false },
 				legend: { orientation: 'h', x: 0, y: 1.12, font: { color: PLOT_COLORS.text, size: 10 } },
 				shapes,
 				hoverlabel: { bgcolor: PLOT_COLORS.hoverBg, bordercolor: PLOT_COLORS.hoverBorder, font: { color: PLOT_COLORS.text, size: 10 }, align: 'left' },
@@ -887,11 +933,13 @@ const dailyNetChart = useMemo(() => {
 		if(Object.values(sums).every(v => v === 0)) return null;
 		const labels = canonical.map(k => k.replace('_',' '));
 		const values = canonical.map(k => sums[k]);
+		const textPos = getBarLabelPositions(values);
+		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		// Dynamic left margin: scale with longest label length (approx 7px per char) but clamp for consistency
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b, '');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
+		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition: textPos, textfont:{ color: textColors, size: 11 }, cliponaxis: false, insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
@@ -913,10 +961,12 @@ const dailyNetChart = useMemo(() => {
 		const labels = ['Income','Savings','Expense'];
 		const values = [income, savings, expenseOut];
 		const colors = [CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.negative];
+		const textPos = getBarLabelPositions(values);
+		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
+		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition: textPos, textfont:{ color: textColors, size: 11 }, cliponaxis: false, insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
@@ -950,10 +1000,13 @@ const dailyNetChart = useMemo(() => {
 		if(charges===0 && payments===0) return null;
 		const payoffRatio = charges>0 ? payments/charges : null;
 		const labels = ['Charges','Payments'];
+		const values = [charges, payments];
+		const textPos = getBarLabelPositions(values);
+		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
-		const leftMargin = Math.min(105, Math.max(54, longest.length * 7));
+		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data:[{ type:'bar', orientation:'h', x:[charges,payments], y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition:'inside', insidetextanchor:'middle', textfont:{ color:PLOT_COLORS.markerEdge, size:11 }, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data:[{ type:'bar', orientation:'h', x: values, y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition: textPos, insidetextanchor:'middle', textfont:{ color: textColors, size:11 }, cliponaxis: false, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
 		};
 	}, [filteredTxns]);
@@ -2051,21 +2104,11 @@ const dailyNetChart = useMemo(() => {
 												</div>
 											</div>
 												<div className="detail-actions">
-													<button className="link-cta" onClick={() => setShowFrontDetails(v => !v)} aria-expanded={showFrontDetails}>
-														{showFrontDetails ? 'Hide details' : 'Details'}
-													</button>
 													<a className="link-cta" href="/privacy-trust.html">Privacy &amp; Trust page</a>
 												</div>
 												<p className="developer-line">
 													Meet the developer: <a className="link-cta" href="https://www.linkedin.com/in/vahidin-jupic-0947b534b/" target="_blank" rel="noreferrer">Vahidin Jupic on LinkedIn</a>
 												</p>
-											{showFrontDetails && (
-												<ul className="detail-list" aria-label="Privacy details">
-													<li>Parsed results are returned to your browser and not persisted by default.</li>
-													<li>You can remove local data at any time with Clear in Recent.</li>
-													<li>AI refinement is optional and can be toggled off at any time.</li>
-												</ul>
-											)}
 											<div className="stage-nav">
 												<button className="ghost-cta" onClick={() => setFrontStage(1)}>Back</button>
 												<button className="primary-cta" onClick={() => setFrontStage(3)}>Next</button>
@@ -2112,7 +2155,7 @@ const dailyNetChart = useMemo(() => {
 												<div id="help-tools-panel" className="settings-panel" aria-label="Help & tools">
 													<div className="help-card" aria-label="Help overview">
 														<ul className="help-hints">
-															<li>Use filters to focus a slice, then compare with Filtered vs Overall.</li>
+															<li>Use filters to focus a slice, then compare with Net Trend Comparison.</li>
 															<li>Daily Net supports drag-select to zoom a date range.</li>
 															<li>Transfers are excluded from allocation and savings metrics.</li>
 														</ul>
@@ -2406,30 +2449,30 @@ const dailyNetChart = useMemo(() => {
 						<section className="charts-row four-charts unified">
 							<span id="charts-start" className="sr-only" />
 							<React.Suspense fallback={<div className="chart" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:180}}>Loading charts…</div>}>
-									{filteredVsOverallChart && (
-									<div className={"chart" + (activeModebarChart==='filtered-overall' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('filtered-overall', e)}>
+									{netTrendComparisonChart && (
+									<div className={"chart" + (activeModebarChart==='net-trend' ? ' modebar-active' : '')} onClick={(e)=> toggleModebar('net-trend', e)}>
 										<span
-											className={"chart-info" + (openChartTooltip==='filtered-overall' ? ' open' : '')}
+											className={"chart-info" + (openChartTooltip==='net-trend' ? ' open' : '')}
 											tabIndex={0}
 											role="button"
 											aria-haspopup="dialog"
-											aria-expanded={openChartTooltip==='filtered-overall'}
-											aria-label="Filtered vs Overall: Compare net result of your current filters against the full statement to estimate focus impact."
-											onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('filtered-overall'); }}
-											onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('filtered-overall'); } }}
+											aria-expanded={openChartTooltip==='net-trend'}
+											aria-label="Net Trend Comparison: Compare filtered daily net against overall daily net across time."
+											onClick={(e)=> { e.stopPropagation(); toggleChartTooltip('net-trend'); }}
+											onKeyDown={(e)=> { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleChartTooltip('net-trend'); } }}
 										>i
 											<span className="tooltip" role="tooltip">
-												<strong>Filtered vs Overall</strong><br/>
-												How much the current filters explain the full statement.
+												<strong>Net Trend Comparison</strong><br/>
+												Compare daily net for your filtered slice vs the full statement.
 												<ul>
-													<li><span className="kw-accent">Filtered</span>: Net sum of the rows you are viewing.</li>
-													<li><span className="kw-accent">Overall</span>: Net sum of the entire statement.</li>
-													<li><span className="kw-risk">Big gap</span>: Filters exclude a lot of activity.</li>
-													<li><span className="kw-positive">Close match</span>: Filters cover most activity.</li>
+													<li><span className="kw-accent">Filtered</span>: Daily net for the rows you are viewing.</li>
+													<li><span className="kw-accent">Overall</span>: Daily net for the entire statement.</li>
+													<li><span className="kw-risk">Divergence</span>: Filters behave differently than overall.</li>
+													<li><span className="kw-positive">Overlap</span>: Filtered trend mirrors the full statement.</li>
 												</ul>
 											</span>
 										</span>
-									<Plot {...filteredVsOverallChart} className="plot-inner" useResizeHandler style={{width:'100%', height:'100%'}} />
+									<Plot {...netTrendComparisonChart} className="plot-inner" useResizeHandler style={{width:'100%', height:'100%'}} />
 									</div>
 									)}
 									{dailyNetChart && (
