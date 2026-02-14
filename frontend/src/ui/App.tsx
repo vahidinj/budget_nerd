@@ -106,12 +106,6 @@ const deriveAmountStats = (txs: Txn[]): AmountStats | null => {
 const formatNumber = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const formatInt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
-const getBarLabelPositions = (values: number[], smallRatio = 0.18) => {
-	const maxAbs = Math.max(0, ...values.map(v => Math.abs(v)));
-	if (!maxAbs) return values.map(() => 'inside');
-	return values.map(v => (Math.abs(v) <= maxAbs * smallRatio ? 'outside' : 'inside'));
-};
-
 const DEBOUNCE_MS = 220;
 const HEALTH_POLL_MS = 10000;
 const TXN_ROW_HEIGHT = 32;
@@ -450,7 +444,6 @@ export const App: React.FC = () => {
 			if(!raw) return; const prefs = JSON.parse(raw);
 			if(prefs.dateFormat==='mdy'||prefs.dateFormat==='dmy') setDateFormat(prefs.dateFormat);
 			if(prefs.showCols) setVisibleCols((prev)=> ({...prev, ...prefs.showCols}));
-			if(Array.isArray(prefs.types)) setActiveAccountTypes(prefs.types);
 			if(prefs.sort && prefs.sort.key && prefs.sort.dir) setSort(prefs.sort);
 			if(typeof prefs.useAI === 'boolean') setUseAI(prefs.useAI);
 		} catch {/* ignore */}
@@ -477,7 +470,7 @@ export const App: React.FC = () => {
 	}, []);
 
 	const restoreSession = useCallback(() => {
-		try { const raw = localStorage.getItem('lastParse'); if(!raw) return; const parsed: ParseResponse = JSON.parse(raw); setParseResult(parsed); setUndoState({}); setActiveAccountTypes(parsed.metrics.account_types || []); setLiveStatus('Session restored.'); } catch {/* ignore */}
+		try { const raw = localStorage.getItem('lastParse'); if(!raw) return; const parsed: ParseResponse = JSON.parse(raw); setParseResult(parsed); setUndoState({}); setActiveAccountTypes([]); setActiveSources([]); setLiveStatus('Session restored.'); } catch {/* ignore */}
 	}, []);
 
 	const loadDemoSample = useCallback(async () => {
@@ -487,7 +480,8 @@ export const App: React.FC = () => {
 			const data = (mod as any).sampleData;
 			setParseResult(data as any);
 			setUndoState({});
-			setActiveAccountTypes(data.metrics.account_types||[]);
+			setActiveAccountTypes([]);
+			setActiveSources([]);
 			setShowSankeyFlow(false); // Ensure Sankey is off by default in demo
 			setLiveStatus('Loaded demo sample.');
 			pushRecent('Demo Sample', data.metrics.transaction_count);
@@ -510,7 +504,8 @@ export const App: React.FC = () => {
 					const parsed: ParseResponse = JSON.parse(raw);
 					setParseResult(parsed);
 					setUndoState({});
-					setActiveAccountTypes(parsed.metrics.account_types || []);
+					setActiveAccountTypes([]);
+					setActiveSources([]);
 					setLiveStatus('Session restored.');
 					return;
 				}
@@ -541,8 +536,8 @@ export const App: React.FC = () => {
 		try {
 			const form = new FormData(); form.append('file', file);
 			const res = await axios.post<ParseResponse>(apiUrl('/parse?debug=1'), form, { headers: { 'Content-Type': 'multipart/form-data' } });
-			setParseResult(res.data); setUndoState({}); setActiveAccountTypes(res.data.metrics.account_types || []);
-			setActiveSources([res.data.fileName]);
+			setParseResult(res.data); setUndoState({}); setActiveAccountTypes([]);
+			setActiveSources([]);
 			setCategoriesApplied(false); // reset categorization state for new file
 			refineAttemptedRef.current = false; // reset refine attempt for new data
 			try { localStorage.setItem('lastParse', JSON.stringify(res.data)); localStorage.setItem('lastParse_ts', Date.now().toString()); } catch {/* ignore */}
@@ -589,8 +584,8 @@ export const App: React.FC = () => {
 				const single = results[0];
 				setParseResult(single);
 				setUndoState({});
-				setActiveAccountTypes(single.metrics.account_types || []);
-				setActiveSources([single.fileName]);
+				setActiveAccountTypes([]);
+				setActiveSources([]);
 				setCategoriesApplied(false); refineAttemptedRef.current = false;
 				setLiveStatus(`Parsed 1 file (${single.metrics.transaction_count} transactions).`);
 				try { localStorage.setItem('lastParse', JSON.stringify(single)); localStorage.setItem('lastParse_ts', Date.now().toString()); } catch {/* ignore */}
@@ -624,8 +619,8 @@ export const App: React.FC = () => {
 			};
 			setParseResult(merged);
 			setUndoState({});
-			setActiveSources(results.map(r=> r.fileName));
-			setActiveAccountTypes(merged.metrics.account_types || []);
+			setActiveSources([]);
+			setActiveAccountTypes([]);
 			setCategoriesApplied(false); refineAttemptedRef.current = false;
 			setLiveStatus(`Parsed ${results.length} files · ${txnCount} transactions combined.`);
 			try { localStorage.setItem('lastParse', JSON.stringify(merged)); localStorage.setItem('lastParse_ts', Date.now().toString()); } catch {/* ignore */}
@@ -933,13 +928,11 @@ const dailyNetChart = useMemo(() => {
 		if(Object.values(sums).every(v => v === 0)) return null;
 		const labels = canonical.map(k => k.replace('_',' '));
 		const values = canonical.map(k => sums[k]);
-		const textPos = getBarLabelPositions(values);
-		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		// Dynamic left margin: scale with longest label length (approx 7px per char) but clamp for consistency
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b, '');
 		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition: textPos, textfont:{ color: textColors, size: 11 }, cliponaxis: false, insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data: [{ type:'bar', x: values, y: labels, orientation:'h', marker:{ color:[CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.category1], line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout: { height:CHART_HEIGHT, title:{ text:'Account Type Mix (Net Flow)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
@@ -961,12 +954,10 @@ const dailyNetChart = useMemo(() => {
 		const labels = ['Income','Savings','Expense'];
 		const values = [income, savings, expenseOut];
 		const colors = [CHART_COLORS.positive, CHART_COLORS.savings, CHART_COLORS.negative];
-		const textPos = getBarLabelPositions(values);
-		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
 		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition: textPos, textfont:{ color: textColors, size: 11 }, cliponaxis: false, insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data: [{ type:'bar', orientation:'h', x: values, y: labels, marker:{ color: colors, line:{ color:PLOT_COLORS.grid, width:1 } }, text: values.map(v=> formatInt(v)), textposition:'inside', insidetextanchor:'middle', hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout: { height:CHART_HEIGHT, title:{ text:'Income · Savings · Expense (Gross Flows)', font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false }
 		};
 	}, [filteredTxns]);
@@ -1000,13 +991,10 @@ const dailyNetChart = useMemo(() => {
 		if(charges===0 && payments===0) return null;
 		const payoffRatio = charges>0 ? payments/charges : null;
 		const labels = ['Charges','Payments'];
-		const values = [charges, payments];
-		const textPos = getBarLabelPositions(values);
-		const textColors = textPos.map(p => (p === 'outside' ? PLOT_COLORS.text : PLOT_COLORS.markerEdge));
 		const longest = labels.reduce((a,b)=> a.length>b.length?a:b,'');
 		const leftMargin = isMobile ? mobileYAxisMargin : Math.min(105, Math.max(54, longest.length * 7));
 		return {
-			data:[{ type:'bar', orientation:'h', x: values, y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition: textPos, insidetextanchor:'middle', textfont:{ color: textColors, size:11 }, cliponaxis: false, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
+			data:[{ type:'bar', orientation:'h', x:[charges,payments], y:['Charges','Payments'], marker:{ color:[CHART_COLORS.negative, CHART_COLORS.positive], line:{ color:PLOT_COLORS.grid, width:1 } }, text:[formatInt(charges), formatInt(payments)], textposition:'inside', insidetextanchor:'middle', textfont:{ color:PLOT_COLORS.markerEdge, size:11 }, hovertemplate:'<b>%{y}</b><br>%{x:,.0f}<extra></extra>' }],
 				layout:{ height:CHART_HEIGHT, title:{ text:'Credit Charges vs Payments'+(payoffRatio!==null?` (Payoff ${Math.round(payoffRatio*1000)/10}% )`:(charges===0? ' (Inferred Payments)':'') ) , font:{ color:PLOT_COLORS.text, size:13 } }, margin:{ l:leftMargin, r:6, t:32, b:24 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:PLOT_COLORS.text, size:11 }, xaxis:{ showgrid:false, tickformat:',.0f', linecolor:PLOT_COLORS.line, zerolinecolor:PLOT_COLORS.grid }, yaxis:{ showgrid:false, linecolor:PLOT_COLORS.line, automargin:true }, showlegend:false, hoverlabel:{ bgcolor:PLOT_COLORS.hoverBg, bordercolor:PLOT_COLORS.hoverBorder, font:{ color:PLOT_COLORS.text, size:10 } }, shapes:(charges>0 && payments>0)?[{ type:'line', x0:charges, x1:charges, y0:-0.5, y1:1.5, line:{ color:PLOT_COLORS.line, width:1, dash:'dot' }}]:[] }
 		};
 	}, [filteredTxns]);
