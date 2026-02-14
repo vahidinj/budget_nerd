@@ -200,6 +200,11 @@
   font-size: 0.92rem;
   line-height: 1.5;
 }
+.cover-minimal .developer-line {
+  margin: 0 0 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
 .cover-minimal .front-utility-row {
   display: flex;
   flex-wrap: wrap;
@@ -539,14 +544,31 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 
 /* Mobile integration: search bar full-width; place date filters + categorize below it and keep symmetry */
 @media (max-width: 640px) {
-  .filters.consolidated {
-    padding:.65rem .6rem;
+    .filters.consolidated {
+      padding: .45rem .5rem .5rem .5rem;
+    overflow-x:auto;
+    scrollbar-width:auto;
+    scrollbar-color:#36506a transparent;
   }
 
   .filters.consolidated .filters-head {
     flex-direction:column;
     align-items:stretch;
     gap:.5rem;
+  }
+
+  .filters.consolidated::-webkit-scrollbar {
+    height:7px;
+  }
+
+  .filters.consolidated::-webkit-scrollbar-track {
+    background:rgba(20,28,38,0.35);
+    border-radius:999px;
+  }
+
+  .filters.consolidated::-webkit-scrollbar-thumb {
+    background:linear-gradient(90deg, rgba(90,183,255,0.75), rgba(49,120,198,0.9));
+    border-radius:999px;
   }
 
   .filters-toggle,
@@ -647,7 +669,7 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
 /* Stack and constrain categorize cluster on small screens */
 @media (max-width: 640px) {
   .filters-advanced {
-    padding:.5rem .55rem;
+    padding:.35rem .45rem;
     overflow:hidden;
   }
 
@@ -687,13 +709,31 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
   }
 
   .filters-advanced-body .source-chips {
-    overflow:hidden;
+    overflow-x:auto;
+    scrollbar-width:auto;
     align-self:stretch;
   }
 
   .filters-secondary-row .col-toggle-group {
     flex-wrap:wrap;
-    overflow:visible;
+    overflow-x:auto;
+    scrollbar-width:auto;
+  }
+
+  .filters-advanced-body .source-chips::-webkit-scrollbar,
+  .filters-secondary-row .col-toggle-group::-webkit-scrollbar {
+    height:6px;
+  }
+
+  .filters-advanced-body .source-chips::-webkit-scrollbar-track,
+  .filters-secondary-row .col-toggle-group::-webkit-scrollbar-track {
+    background:transparent;
+  }
+
+  .filters-advanced-body .source-chips::-webkit-scrollbar-thumb,
+  .filters-secondary-row .col-toggle-group::-webkit-scrollbar-thumb {
+    background:#25303c;
+    border-radius:20px;
   }
 
   .filters-advanced-body .source-chips .chip,
