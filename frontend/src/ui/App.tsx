@@ -11,6 +11,7 @@ import { useDebouncedValue, useWindowedRows, usePolling } from './hooks';
 import { DragonBallHeader } from './DragonBallHeader';
 import { DatePicker } from './DatePicker';
 import { DragonOrbIcon } from './DragonOrbIcon';
+import { MascotIcon } from './MascotIcon';
 import PortalPopover from './PortalPopover';
 import { buildConsistencyReport, ConsistencyReport } from './consistency';
 function sanitizeFilename(name?: string | null) {
@@ -2645,6 +2646,10 @@ const dailyNetChart = useMemo(() => {
 											setLiveStatus('Filters reset to defaults.');
 										}}>Reset</button>
 									)}
+								</div>
+								<div className="filters-mascot" aria-hidden="true">
+									<span className="filters-mascot-text">Keep scrolling -&gt;</span>
+									<MascotIcon size={28} className="filters-mascot-icon" />
 								</div>
 							</div>
 							{activeFilterLabels.length > 0 && (
