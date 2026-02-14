@@ -578,6 +578,7 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
     border:1px solid rgba(49,74,97,0.5);
     border-radius:999px;
     padding:.18rem .45rem .18rem .35rem;
+    animation:filtersMascotCue 2s ease-out 2;
   }
 
   .filters-mascot-text {
@@ -591,6 +592,13 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
   .filters-mascot-icon {
     width:22px;
     height:22px;
+  }
+
+  @keyframes filtersMascotCue {
+    0% { transform:translateX(0); box-shadow:none; }
+    35% { transform:translateX(6px); box-shadow:0 0 0 2px rgba(111,214,255,0.18); }
+    70% { transform:translateX(0); box-shadow:none; }
+    100% { transform:translateX(0); }
   }
 
 
@@ -1217,7 +1225,7 @@ a:hover, .dev-link:hover { color:var(--link-accent-hover); }
   .filters .search-composite .date-range.inside-search { position:static; transform:none; justify-content:flex-start; flex-wrap:wrap; gap:.3rem; }
 }
 .filter-primary-row > * { display:flex; flex-direction:column; justify-content:stretch; }
-@media (prefers-reduced-motion: reduce){ .filters-panel { animation:none; } .filters-toggle:after { display:none; } }
+@media (prefers-reduced-motion: reduce){ .filters-panel { animation:none; } .filters-toggle:after { display:none; } .filters-mascot { animation:none; } }
 .filters input { background:#14191f; border:1px solid #2a3848; padding:.55rem .7rem; border-radius:8px; color:var(--text-strong); font-size:.9rem; }
 .filters input:focus { outline:2px solid #3a516a; }
 .filters .date-range { display:flex; align-items:flex-end; gap:.5rem; margin-top:-9px; /* fine-tuned lift for bottom border alignment */ }

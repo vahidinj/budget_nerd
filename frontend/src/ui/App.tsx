@@ -241,6 +241,7 @@ export const App: React.FC = () => {
 	} | null>(null);
 	const [uploadWarnings, setUploadWarnings] = useState<string[]>([]);
 	const [dragAnnounce, setDragAnnounce] = useState('');
+	const filtersPanelRef = useRef<HTMLDivElement | null>(null);
 	// Cover: minimalist 3-step front stage
 	const [frontStage, setFrontStage] = useState<1 | 2 | 3>(1);
 	// Date range filter (inclusive). Empty string means no bound.
@@ -753,6 +754,14 @@ export const App: React.FC = () => {
 		}
 		return result;
 	}, [parseResult, filter, activeAccountTypes, activeSources, sort, dateStart, dateEnd]);
+
+	const scrollFiltersPanel = useCallback(() => {
+		const el = filtersPanelRef.current;
+		if (!el) return;
+		const delta = el.clientWidth || 0;
+		if (delta <= 0) return;
+		el.scrollBy({ left: delta, behavior: 'smooth' });
+	}, []);
 
 	// Filter-aware consistency report for UI (reacts to filters)
 	const filteredConsistencyReport = useMemo(() => {
@@ -2647,8 +2656,20 @@ const dailyNetChart = useMemo(() => {
 										}}>Reset</button>
 									)}
 								</div>
-								<div className="filters-mascot" aria-hidden="true">
-									<span className="filters-mascot-text">Keep scrolling -&gt;</span>
+								<div
+									className="filters-mascot"
+									role="button"
+									tabIndex={0}
+									aria-label="Scroll filters"
+									onClick={scrollFiltersPanel}
+									onKeyDown={(e)=> {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											scrollFiltersPanel();
+										}
+									}}
+								>
+									<span className="filters-mascot-text">Keep scrolling →</span>
 									<MascotIcon size={28} className="filters-mascot-icon" />
 								</div>
 							</div>
@@ -2660,7 +2681,7 @@ const dailyNetChart = useMemo(() => {
 									))}
 								</div>
 							)}
-							<div className="filters-panel">
+							<div className="filters-panel" ref={filtersPanelRef}>
 								<div className="filters-advanced">
 									<div className="filters-advanced-body">
 										<div className="filters-secondary-row">
